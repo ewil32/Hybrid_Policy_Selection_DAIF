@@ -69,18 +69,20 @@ class VAE(keras.Model):
         ]
 
     def train_step(self, data):
+
+        # unpack data
+        x, reg_dist = x
         with tf.GradientTape() as tape:
-            z_mean, z_stddev, z = self.encoder(data)
+            z_mean, z_stddev, z = self.encoder(x)
             reconstruction = self.decoder(z)
-            # reconstruction_loss = tf.reduce_mean(keras.losses.binary_crossentropy(data, reconstruction), axis=0)
             reconstruction_loss = keras.losses.binary_crossentropy(data, reconstruction)
-            # reconstruction_loss = reconstruction_loss * data.shape[1]  # Think I needed this to balance out for the data set. It makes it work but I don't know why
 
-            # kl_loss = -0.5 * (1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var))
+            if reg_dist is None:  # we regularise against standard guassian
+                kl_loss = -tf.math.log(z_stddev) + 0.5 * (tf.square(z_stddev) + tf.square(z_mean) - 1)
+            else:
+                pred_dist = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_stddev)
+                kl_loss = tfp.distributions.kl_divergence(reg_dist, pred_dist)
 
-            kl_loss = -tf.math.log(z_stddev) + 0.5 * (tf.square(z_stddev) + tf.square(z_mean) - 1)
-
-            # kl_loss = tf.reduce_mean(tf.reduce_sum(kl_loss, axis=1))
             kl_loss = tf.reduce_sum(kl_loss, axis=1)
             total_loss = reconstruction_loss + kl_loss
         grads = tape.gradient(total_loss, self.trainable_weights)

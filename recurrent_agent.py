@@ -44,6 +44,8 @@ class DAIFAgentRecurrent:
         self.tran = tran
         self.tran.compile(optimizer=tf.keras.optimizers.Adam())
 
+        self.hidden_state = None
+
 
     def select_action(self, observation):
 
@@ -52,7 +54,7 @@ class DAIFAgentRecurrent:
         # return a distribution that we can sample from
         return tfp.distributions.MultivariateNormalDiag(loc=policy_mean, scale_diag=policy_stddev)
 
-    def train(self, pre_observations, post_observations, actions):
+    def train(self, pre_observations, post_observations, actions, hidden_state):
 
         # pre and post should have shape [sim_steps, ob_dim], actions has shape [sim_steps, action_dim]
 
@@ -62,32 +64,48 @@ class DAIFAgentRecurrent:
 
         # use latent obs to train transition
         z_train = np.concatenate([np.array(pre_latent_mean), np.array(actions)], axis=1)
-        self.tran.fit((z_train, what_is_the_initial_state), (post_latent_mean, post_latent_stddev))
+
+        # 1 example 12 sim steps, 3 ob dim
+        z_train_seq = z_train.reshape((1, 12, 3))
+        z_train_singles = z_train.reshape(12, 1, 3)
+
+        if self.hidden_state is None:
+            self.hidden_state = np.zeros_like(z_train)
+
+        # get the hidden states for the sequences
+        _, _, _, h_states = self.tran((z_train_seq, self.hidden_state))
+
+        # use the hidden states as memory for inputting individual sequences
+        hidden_states_for_training = np.vstack([self.hidden_state, h_states[:-1]])
+        self.tran.fit((z_train_singles, hidden_states_for_training), (post_latent_mean, post_latent_stddev))
 
         # now find the new predicted post_latents
-        pred_post_latent, pred_post_stddev = self.tran((z_train, what_is_the_initial_state))
+        pred_post_latent_mean, pred_post_stddev, final_hidden_state, _ = self.tran((z_train_singles, hidden_states_for_training))
 
         # use hidden states from transition to regularise fitting process of vae
+        reg_dist = tfp.distributions.MultivariateNormalDiag(loc=pred_post_latent_mean, scale_diag=pred_post_stddev)
 
-        #
-        pass
+        self.model_vae.fit((post_observations, reg_dist)
+
+        # set the hidden state to use in the next training step
+        self.hidden_state = final_hidden_state
 
 
-    def train_vae(self, observation, verbose=0):
-        self.model_vae.fit(observation, verbose=verbose)
-
-
-    def train_transition(self, o_t_minus_one, o_t, action_t_minus_one, verbose=0):
-
-        # find the latent reps with the decoder
-        z_t_minus_1_mean, z_t_minus_1_stddev, z_t_minus = self.enc(o_t_minus_one)
-        z_t_mean, z_t_stddev, z_t = self.enc(o_t)
-
-        # concatenate action and observation for input into transition
-        z_train = np.concatenate([np.array(z_t_minus_1_mean), np.array(action_t_minus_one)], axis=1)
-
-        # train the transition model
-        self.tran.fit(z_train, (z_t_mean, z_t_stddev), epochs=1, verbose=verbose)
+    # def train_vae(self, observation, verbose=0):
+    #     self.model_vae.fit(observation, verbose=verbose)
+    #
+    #
+    # def train_transition(self, o_t_minus_one, o_t, action_t_minus_one, verbose=0):
+    #
+    #     # find the latent reps with the decoder
+    #     z_t_minus_1_mean, z_t_minus_1_stddev, z_t_minus = self.enc(o_t_minus_one)
+    #     z_t_mean, z_t_stddev, z_t = self.enc(o_t)
+    #
+    #     # concatenate action and observation for input into transition
+    #     z_train = np.concatenate([np.array(z_t_minus_1_mean), np.array(action_t_minus_one)], axis=1)
+    #
+    #     # train the transition model
+    #     self.tran.fit(z_train, (z_t_mean, z_t_stddev), epochs=1, verbose=verbose)
 
 
     def cem_policy_optimisation(self, z_t_minus_one):
