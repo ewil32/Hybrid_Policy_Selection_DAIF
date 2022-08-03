@@ -3,7 +3,6 @@ import tensorflow_probability as tfp
 import keras
 from keras import layers
 import numpy as np
-import matplotlib.pyplot as plt
 
 from vae import VAE
 
@@ -15,18 +14,26 @@ class DAIFAgentRecurrent:
                  enc,
                  dec,
                  tran,
+                 given_prior_mean,
+                 given_prior_stddev,
                  planning_horizon=15,
                  n_policies=1500,
                  n_cem_policy_iterations=2,
                  n_policy_candidates=70):
 
-        super(DAIFAgent, self).__init__()
+        super(DAIFAgentRecurrent, self).__init__()
 
         self.prior_model = prior_model
         self.planning_horizon = planning_horizon
         self.n_policy_candidates = n_policy_candidates
         self.n_policies = n_policies
         self.n_cem_policy_iterations = n_cem_policy_iterations
+
+        self.vae_train_epochs = 2
+        self.tran_train_epochs = 2
+
+        self.given_prior_mean = given_prior_mean
+        self.given_prior_stddev = given_prior_stddev
 
         # encoder
         self.enc = enc
@@ -54,13 +61,13 @@ class DAIFAgentRecurrent:
         # return a distribution that we can sample from
         return tfp.distributions.MultivariateNormalDiag(loc=policy_mean, scale_diag=policy_stddev)
 
-    def train(self, pre_observations, post_observations, actions, hidden_state):
+    def train(self, pre_observations, post_observations, actions, verbose=0):
 
         # pre and post should have shape [sim_steps, ob_dim], actions has shape [sim_steps, action_dim]
 
         # use vae to get latent obs
-        pre_latent_mean, pre_latent_stddev = self.model_vae.encoder(pre_observations)
-        post_latent_mean, post_latent_stddev = self.model_vae.encoder(post_observations)
+        pre_latent_mean, pre_latent_stddev, pre_latent = self.model_vae.encoder(pre_observations)
+        post_latent_mean, post_latent_stddev, post_latent = self.model_vae.encoder(post_observations)
 
         # use latent obs to train transition
         z_train = np.concatenate([np.array(pre_latent_mean), np.array(actions)], axis=1)
@@ -70,42 +77,47 @@ class DAIFAgentRecurrent:
         z_train_singles = z_train.reshape(12, 1, 3)
 
         if self.hidden_state is None:
-            self.hidden_state = np.zeros_like(z_train)
+            self.hidden_state = np.zeros((1, self.tran.hidden_units))
 
         # get the hidden states for the sequences
         _, _, _, h_states = self.tran((z_train_seq, self.hidden_state))
 
+        # hidden states for t=0, t=1, ..., t=n-1 and we want to exclude the last one
+        h_states_to_use = h_states.numpy().reshape(12, self.tran.hidden_units)[:-1]
+
         # use the hidden states as memory for inputting individual sequences
-        hidden_states_for_training = np.vstack([self.hidden_state, h_states[:-1]])
-        self.tran.fit((z_train_singles, hidden_states_for_training), (post_latent_mean, post_latent_stddev))
+        hidden_states_for_training = np.vstack([self.hidden_state, h_states_to_use])
+        self.tran.fit((z_train_singles, hidden_states_for_training), (post_latent_mean, post_latent_stddev), epochs=self.tran_train_epochs, verbose=verbose)
 
         # now find the new predicted post_latents
-        pred_post_latent_mean, pred_post_stddev, final_hidden_state, _ = self.tran((z_train_singles, hidden_states_for_training))
+        pred_post_latent_mean, pred_post_stddev, _, _ = self.tran((z_train_singles, hidden_states_for_training))
 
         # use hidden states from transition to regularise fitting process of vae
-        reg_dist = tfp.distributions.MultivariateNormalDiag(loc=pred_post_latent_mean, scale_diag=pred_post_stddev)
+        # reg_dist = tfp.distributions.MultivariateNormalDiag(loc=pred_post_latent_mean, scale_diag=pred_post_stddev)
 
-        self.model_vae.fit((post_observations, reg_dist)
+        self.model_vae.fit(post_observations, (pred_post_latent_mean, pred_post_stddev), epochs=self.vae_train_epochs, verbose=verbose)
 
         # set the hidden state to use in the next training step
+        _, _, final_hidden_state, _ = self.tran((z_train_seq, self.hidden_state))
+
         self.hidden_state = final_hidden_state
 
 
-    # def train_vae(self, observation, verbose=0):
-    #     self.model_vae.fit(observation, verbose=verbose)
-    #
-    #
-    # def train_transition(self, o_t_minus_one, o_t, action_t_minus_one, verbose=0):
-    #
-    #     # find the latent reps with the decoder
-    #     z_t_minus_1_mean, z_t_minus_1_stddev, z_t_minus = self.enc(o_t_minus_one)
-    #     z_t_mean, z_t_stddev, z_t = self.enc(o_t)
-    #
-    #     # concatenate action and observation for input into transition
-    #     z_train = np.concatenate([np.array(z_t_minus_1_mean), np.array(action_t_minus_one)], axis=1)
-    #
-    #     # train the transition model
-    #     self.tran.fit(z_train, (z_t_mean, z_t_stddev), epochs=1, verbose=verbose)
+        # def train_vae(self, observation, verbose=0):
+        #     self.model_vae.fit(observation, verbose=verbose)
+        #
+        #
+        # def train_transition(self, o_t_minus_one, o_t, action_t_minus_one, verbose=0):
+        #
+        #     # find the latent reps with the decoder
+        #     z_t_minus_1_mean, z_t_minus_1_stddev, z_t_minus = self.enc(o_t_minus_one)
+        #     z_t_mean, z_t_stddev, z_t = self.enc(o_t)
+        #
+        #     # concatenate action and observation for input into transition
+        #     z_train = np.concatenate([np.array(z_t_minus_1_mean), np.array(action_t_minus_one)], axis=1)
+        #
+        #     # train the transition model
+        #     self.tran.fit(z_train, (z_t_mean, z_t_stddev), epochs=1, verbose=verbose)
 
 
     def cem_policy_optimisation(self, z_t_minus_one):
@@ -164,11 +176,23 @@ class DAIFAgentRecurrent:
         z_means = []
         z_sds = []
 
+        # get the starting hidden state that coressponds to the memory stored by the previous sequences. Should have shape (1, self.tran.num_hidden_units) for the observed sequence
+        # extend the current hidden state to the number of policies present
+        if self.hidden_state is None:
+            cur_hidden_state = np.zeros((self.n_policies, self.tran.hidden_units))
+        else:
+            cur_hidden_state = np.vstack([self.hidden_state]*self.n_policies)
+
         # find the predicted latent states from the transition model
         for t in range(self.planning_horizon):
 
-            tran_input = np.concatenate([prev_latent_mean, policies[:, t].reshape(self.n_policies, 1)], axis=1)
-            next_latent_mean, next_latent_sd = self.tran(tran_input)  # shape = [num policies, latent dim
+            ob_plus_action = np.concatenate([prev_latent_mean, policies[:, t].reshape(self.n_policies, 1)], axis=1)
+            tran_input = ob_plus_action.reshape((self.n_policies, 1, ob_plus_action.shape[1]))  # reshape to pass to GRU
+
+            next_latent_mean, next_latent_sd, next_hidden_state, _ = self.tran((tran_input, cur_hidden_state))  # shape = [num policies, latent dim
+
+            # update the hidden state for use with the next policies
+            cur_hidden_state = next_hidden_state
 
             policy_posteriors.append(next_latent_mean)
             policy_sds.append(next_latent_sd)
@@ -218,16 +242,16 @@ class DAIFAgentRecurrent:
 
             if self.prior_model is None:
 
-                # TODO how exactly is the prior defined
+                # TODO how exactly is the prior defined? After you apply transformations what is the prior
                 # create the prior distribution
-                prior_preferences = tf.convert_to_tensor(np.stack([[0.5, 100]]*self.n_policies), dtype="float32")
+                prior_preferences_mean = tf.convert_to_tensor(np.stack([self.given_prior_mean]*self.n_policies), dtype="float32")
+                prior_preferences_stddev = tf.convert_to_tensor(np.stack([self.given_prior_stddev]*self.n_policies), dtype="float32")
 
-                prior_dist = tfp.distributions.MultivariateNormalDiag(loc=prior_preferences, scale_diag=np.ones_like(prior_preferences))
+                prior_dist = tfp.distributions.MultivariateNormalDiag(loc=prior_preferences_mean, scale_diag=prior_preferences_stddev)
 
             # TODO Fix the learned prior model
             else:
                 prior_dist = self.prior_model()
-
 
             kl_extrinsic = tfp.distributions.kl_divergence(likelihood_dist, prior_dist)
 

@@ -26,7 +26,7 @@ def random_observation_sequence(env, length):
     return np.array(observations), np.array(actions), np.array(rewards)
 
 
-def transform_observations(observations, noise_stddev):
+def transform_observations(observations, observation_max, observation_min, noise_stddev):
     """
     Transform mountain car observations to be in the range 0 to 1
     :param observations:
@@ -39,8 +39,8 @@ def transform_observations(observations, noise_stddev):
     # observation_min = np.array([-1.2, -0.07])
 
     # Need to increase the max and min to allow for random noise to be added
-    observation_max = np.array([1.2, 0.14])
-    observation_min = np.array([-2.4, -0.14])
+    # observation_max = np.array([1.2, 0.14])
+    # observation_min = np.array([-2.4, -0.14])
 
     # add noise
     observation_noisy = observations + np.random.normal(loc=0, scale=noise_stddev)

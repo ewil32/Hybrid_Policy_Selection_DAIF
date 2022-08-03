@@ -10,7 +10,6 @@ class TransitionGRU(keras.Model):
     def __init__(self, latent_dim, action_dim, seq_length, hidden_units, output_dim, batch_size=None, **kwargs):
         super(TransitionGRU, self).__init__(**kwargs)
 
-
         self.latent_dim = latent_dim
         self.action_dim = action_dim
         self.seq_length = seq_length
@@ -18,7 +17,6 @@ class TransitionGRU(keras.Model):
         self.output_dim = output_dim
 
         self.batch_size = batch_size  # this should be number of policies I think
-
 
         inputs = layers.Input(shape=(None, self.latent_dim + self.action_dim))
         initial_state_input = layers.Input((self.hidden_units, ))
