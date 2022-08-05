@@ -42,12 +42,14 @@ def transform_observations(observations, observation_max, observation_min, noise
     # observation_max = np.array([1.2, 0.14])
     # observation_min = np.array([-2.4, -0.14])
 
+    observations_scaled = (observations - observation_min)/(observation_max - observation_min)
+
     # add noise
-    observation_noisy = observations + np.random.normal(loc=0, scale=noise_stddev)
+    observation_noisy = observations_scaled + np.random.normal(loc=0, scale=noise_stddev, size=observations_scaled.shape)
 
-    observations_scaled = (observation_noisy - observation_min)/(observation_max - observation_min)
+    observations_clipped = np.clip(observation_noisy, 0, 1)
 
-    return observations_scaled
+    return observations_clipped
 
 
 

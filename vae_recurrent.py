@@ -23,7 +23,7 @@ def create_encoder(latent_dim, input_dim, hidden_units=[16, 8]):
 
     x = encoder_inputs
     for n in hidden_units:
-        x = layers.Dense(n, activation="relu")(x)
+        x = layers.Dense(n, activation="silu")(x)
 
     z_mean = layers.Dense(latent_dim, name="z_mean")(x)
     z_log_std = layers.Dense(latent_dim, name="z_stddev")(x)  # output log of sd
@@ -40,7 +40,7 @@ def create_decoder(latent_dim, input_dim, hidden_units=[16, 8]):
 
     x = latent_inputs
     for n in hidden_units:
-        x = layers.Dense(n, activation="relu")(x)
+        x = layers.Dense(n, activation="silu")(x)
 
     decoder_outputs = layers.Dense(input_dim, activation="sigmoid")(x)
     decoder = keras.Model(latent_inputs, decoder_outputs, name="decoder")
@@ -49,7 +49,7 @@ def create_decoder(latent_dim, input_dim, hidden_units=[16, 8]):
 
 
 class VAE(keras.Model):
-    def __init__(self, encoder, decoder, **kwargs):
+    def __init__(self, encoder, decoder, reg_mean, reg_stddev, llik_scaling=1, kl_scaling=1, **kwargs):
         super(VAE, self).__init__(**kwargs)
         self.encoder = encoder
         self.decoder = decoder
@@ -59,6 +59,12 @@ class VAE(keras.Model):
         )
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
 
+        self.reg_mean = reg_mean
+        self.reg_stddev = reg_stddev
+
+        self.llik_scaling = llik_scaling
+        self.kl_scaling = kl_scaling
+
     @property
     def metrics(self):
         return [
@@ -67,23 +73,33 @@ class VAE(keras.Model):
             self.kl_loss_tracker,
         ]
 
+    def call(self, inputs, training=None, mask=None):
+        _, _, z = self.encoder(inputs)
+        reconstruction = self.decoder(z)
+        return reconstruction
+
     def train_step(self, data):
 
         # unpack data
-        x, reg_vals = data
-        reg_mean, reg_stddev = reg_vals
+        # x, reg_vals = data
+        x = data
+        # reg_mean, reg_stddev = reg_vals
         with tf.GradientTape() as tape:
             z_mean, z_stddev, z = self.encoder(x)
             reconstruction = self.decoder(z)
-            reconstruction_loss = keras.losses.binary_crossentropy(x, reconstruction)
+            reconstruction_loss = keras.losses.binary_crossentropy(x, reconstruction) * self.llik_scaling  # need scaling to stop collapse
 
-            if reg_vals is None:  # we regularise against standard guassian
-                kl_loss = -tf.math.log(z_stddev) + 0.5 * (tf.square(z_stddev) + tf.square(z_mean) - 1)
+            # if reg_vals is None:  # we regularise against standard guassian
+            #     kl_loss = -tf.math.log(z_stddev) + 0.5 * (tf.square(z_stddev) + tf.square(z_mean) - 1)
+            #
+            # else:  # regularise against the given distributions
+            #     pred_dist = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_stddev)
+            #     reg_dist = tfp.distributions.MultivariateNormalDiag(loc=reg_mean, scale_diag=reg_stddev)
+            #     kl_loss = tfp.distributions.kl_divergence(reg_dist, pred_dist)
 
-            else:  # regularise against the given distributions
-                pred_dist = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_stddev)
-                reg_dist = tfp.distributions.MultivariateNormalDiag(loc=reg_mean, scale_diag=reg_stddev)
-                kl_loss = tfp.distributions.kl_divergence(reg_dist, pred_dist)
+            posterior_dist = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_stddev)
+            reg_dist = tfp.distributions.MultivariateNormalDiag(loc=self.reg_mean, scale_diag=self.reg_stddev)
+            kl_loss = tfp.distributions.kl_divergence(posterior_dist, reg_dist) * self.kl_scaling
 
             # kl_loss = tf.reduce_sum(kl_loss, axis=1)
             total_loss = reconstruction_loss + kl_loss

@@ -1,18 +1,15 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
-import keras
-from keras import layers
 import numpy as np
 
-from vae import VAE
+from basic_agent.vae import VAE
 
 
 class DAIFAgentRecurrent:
 
     def __init__(self,
                  prior_model,
-                 enc,
-                 dec,
+                 vae,
                  tran,
                  given_prior_mean,
                  given_prior_stddev,
@@ -35,15 +32,8 @@ class DAIFAgentRecurrent:
         self.given_prior_mean = given_prior_mean
         self.given_prior_stddev = given_prior_stddev
 
-        # encoder
-        self.enc = enc
-
-        # decoder
-        # takes latent state and outputs observation
-        self.dec = dec
-
         # full vae
-        self.model_vae = VAE(enc, dec)
+        self.model_vae = vae
         self.model_vae.compile(optimizer=tf.keras.optimizers.Adam())
 
         # transition
@@ -60,6 +50,7 @@ class DAIFAgentRecurrent:
 
         # return a distribution that we can sample from
         return tfp.distributions.MultivariateNormalDiag(loc=policy_mean, scale_diag=policy_stddev)
+
 
     def train(self, pre_observations, post_observations, actions, verbose=0):
 
@@ -101,23 +92,6 @@ class DAIFAgentRecurrent:
         _, _, final_hidden_state, _ = self.tran((z_train_seq, self.hidden_state))
 
         self.hidden_state = final_hidden_state
-
-
-        # def train_vae(self, observation, verbose=0):
-        #     self.model_vae.fit(observation, verbose=verbose)
-        #
-        #
-        # def train_transition(self, o_t_minus_one, o_t, action_t_minus_one, verbose=0):
-        #
-        #     # find the latent reps with the decoder
-        #     z_t_minus_1_mean, z_t_minus_1_stddev, z_t_minus = self.enc(o_t_minus_one)
-        #     z_t_mean, z_t_stddev, z_t = self.enc(o_t)
-        #
-        #     # concatenate action and observation for input into transition
-        #     z_train = np.concatenate([np.array(z_t_minus_1_mean), np.array(action_t_minus_one)], axis=1)
-        #
-        #     # train the transition model
-        #     self.tran.fit(z_train, (z_t_mean, z_t_stddev), epochs=1, verbose=verbose)
 
 
     def cem_policy_optimisation(self, z_t_minus_one):
@@ -200,7 +174,7 @@ class DAIFAgentRecurrent:
             next_likelihoods = self.dec(next_latent_mean)
             likelihoods.append(next_likelihoods)
 
-            next_posterior_means, next_posteriors_sds, next_posteriors_z = self.enc(next_likelihoods)
+            next_posterior_means, next_posteriors_sds, next_posteriors_z = self.model_vae.encoder(next_likelihoods)
             z_means.append(next_posterior_means)
             z_sds.append(next_posteriors_sds)
 
