@@ -109,7 +109,7 @@ class VAE(keras.Model):
         self.reconstruction_loss_tracker.update_state(reconstruction_loss)
         self.kl_loss_tracker.update_state(kl_loss)
         return {
-            "loss": self.total_loss_tracker.result(),
+            "loss": self.total_loss_tracker.result(),  # TODO should this be total_loss not loss
             "reconstruction_loss": self.reconstruction_loss_tracker.result(),
             "kl_loss": self.kl_loss_tracker.result(),
         }
