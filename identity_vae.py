@@ -1,14 +1,10 @@
-import numpy as np
-import tensorflow as tf
-import tensorflow_probability as tfp
 import keras
-from keras import layers
-
+import tensorflow as tf
+import numpy as np
 
 def identity_encoder(inputs):
 
     return [inputs, np.ones_like(inputs), inputs]
-
 
 
 def identity_decoder(inputs):
@@ -24,10 +20,6 @@ class IdentityVAE(keras.Model):
         self.encoder = encoder
         self.decoder = decoder
         self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
-        self.reconstruction_loss_tracker = keras.metrics.Mean(
-            name="reconstruction_loss"
-        )
-        self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
 
         self.reg_mean = reg_mean
         self.reg_stddev = reg_stddev
@@ -39,8 +31,6 @@ class IdentityVAE(keras.Model):
     def metrics(self):
         return [
             self.total_loss_tracker,
-            self.reconstruction_loss_tracker,
-            self.kl_loss_tracker,
         ]
 
     def call(self, inputs, training=None, mask=None):
@@ -48,6 +38,5 @@ class IdentityVAE(keras.Model):
 
     def train_step(self, data):
         return {
-            0
+            "total_loss": 0
         }
-

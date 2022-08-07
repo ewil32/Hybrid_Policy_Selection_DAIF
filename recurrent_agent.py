@@ -2,7 +2,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 import numpy as np
 
-from basic_agent.vae import VAE
+from vae_recurrent import VAE
 
 
 class DAIFAgentRecurrent:
@@ -16,7 +16,15 @@ class DAIFAgentRecurrent:
                  planning_horizon=15,
                  n_policies=1500,
                  n_cem_policy_iterations=2,
-                 n_policy_candidates=70):
+                 n_policy_candidates=70,
+                 tran_train_epochs=1,
+                 vae_train_epochs=1,
+                 agent_time_ratio=6,
+                 train_vae=True,
+                 train_tran=True,
+                 use_kl_extrinsic=True,
+                 use_kl_intrinsic=True,
+                 use_FEEF=True):
 
         super(DAIFAgentRecurrent, self).__init__()
 
@@ -26,8 +34,17 @@ class DAIFAgentRecurrent:
         self.n_policies = n_policies
         self.n_cem_policy_iterations = n_cem_policy_iterations
 
-        self.vae_train_epochs = 2
-        self.tran_train_epochs = 2
+        self.vae_train_epochs = vae_train_epochs
+        self.tran_train_epochs = tran_train_epochs
+        self.train_vae = train_vae
+        self.train_tran = train_tran
+
+        # do we use the kl divergence for extrinsic vs intrinsic
+        self.use_kl_intrinsic = use_kl_intrinsic
+        self.use_kl_extrinsic = use_kl_extrinsic
+
+        # do we use the FEEF or EFE?
+        self.use_FEEF = use_FEEF
 
         self.given_prior_mean = given_prior_mean
         self.given_prior_stddev = given_prior_stddev
@@ -43,8 +60,11 @@ class DAIFAgentRecurrent:
 
         self.hidden_state = None
 
+        # how much is the agents planning time compressed compared to the simulation time
+        self.agent_time_ratio = agent_time_ratio
 
-    def select_action(self, observation):
+
+    def select_policy(self, observation):
 
         policy_mean, policy_stddev = self.cem_policy_optimisation(observation)
 
@@ -52,46 +72,73 @@ class DAIFAgentRecurrent:
         return tfp.distributions.MultivariateNormalDiag(loc=policy_mean, scale_diag=policy_stddev)
 
 
-    def train(self, pre_observations, post_observations, actions, verbose=0):
+    def train(self, pre_observations_raw, post_observations_raw, actions_complete, rewards, verbose=0):
 
-        # pre and post should have shape [sim_steps, ob_dim], actions has shape [sim_steps, action_dim]
+        # compress the observations based on the agents time compression factor
+        # pre_observations = pre_observations_raw[::self.agent_time_ratio]  # for example take every 6th element
+        # post_observations = np.array([post_observations_raw[i] for i in range(len(post_observations_raw)) if i % self.agent_time_ratio == self.agent_time_ratio - 1])
+        #
+        # print(pre_observations_raw)
+        # print(pre_observations)
+        # print(post_observations_raw)
+        # print(post_observations)
 
-        # use vae to get latent obs
-        pre_latent_mean, pre_latent_stddev, pre_latent = self.model_vae.encoder(pre_observations)
-        post_latent_mean, post_latent_stddev, post_latent = self.model_vae.encoder(post_observations)
+        pre_observations = pre_observations_raw
+        post_observations = post_observations_raw
 
-        # use latent obs to train transition
-        z_train = np.concatenate([np.array(pre_latent_mean), np.array(actions)], axis=1)
+        #### TRAIN THE TRANSITION MODEL ####
+        if self.train_tran:
+            # only look at the first n actions that we took
+            actions = actions_complete[0: len(pre_observations)]
 
-        # 1 example 12 sim steps, 3 ob dim
-        z_train_seq = z_train.reshape((1, 12, 3))
-        z_train_singles = z_train.reshape(12, 1, 3)
+            num_observations = pre_observations.shape[0]
+            observation_dim = pre_observations.shape[1]
+            action_dim = actions.shape[1]
+            # action_dim = 1  # TODO fix this to allow different actions
 
-        if self.hidden_state is None:
-            self.hidden_state = np.zeros((1, self.tran.hidden_units))
+            # find the actual observed latent states using the vae
+            pre_latent_mean, pre_latent_stddev, pre_latent = self.model_vae.encoder(pre_observations)
+            post_latent_mean, post_latent_stddev, post_latent = self.model_vae.encoder(post_observations)
 
-        # get the hidden states for the sequences
-        _, _, _, h_states = self.tran((z_train_seq, self.hidden_state))
+            # set up the input training data that we use to train the transition model
+            z_train = np.concatenate([np.array(pre_latent_mean), np.array(actions)], axis=1)
 
-        # hidden states for t=0, t=1, ..., t=n-1 and we want to exclude the last one
-        h_states_to_use = h_states.numpy().reshape(12, self.tran.hidden_units)[:-1]
+            # we use the sequence to find the right hidden states to use as input
+            z_train_seq = z_train.reshape((1, num_observations, observation_dim + action_dim))
+            z_train_singles = z_train.reshape(num_observations, 1, observation_dim + action_dim)
 
-        # use the hidden states as memory for inputting individual sequences
-        hidden_states_for_training = np.vstack([self.hidden_state, h_states_to_use])
-        self.tran.fit((z_train_singles, hidden_states_for_training), (post_latent_mean, post_latent_stddev), epochs=self.tran_train_epochs, verbose=verbose)
+            # the previous hidden state is the memory after observing some sequences but it might be None
+            if self.hidden_state is None:
+                self.hidden_state = np.zeros((1, self.tran.hidden_units))
 
-        # now find the new predicted post_latents
-        pred_post_latent_mean, pred_post_stddev, _, _ = self.tran((z_train_singles, hidden_states_for_training))
+            # find the hidden states at t=0, t=1, t=2, ..., t=num_observations - 1
+            _, _, _, h_states = self.tran((z_train_seq, self.hidden_state))
 
-        # use hidden states from transition to regularise fitting process of vae
-        # reg_dist = tfp.distributions.MultivariateNormalDiag(loc=pred_post_latent_mean, scale_diag=pred_post_stddev)
+            # squeeze so we make the shape [num_observations, hidden_units]
+            h_states = tf.squeeze(h_states)
 
-        self.model_vae.fit(post_observations, (pred_post_latent_mean, pred_post_stddev), epochs=self.vae_train_epochs, verbose=verbose)
+            # exclude the last state as this will become the hidden state later on. next hidden state will become our new memory
+            h_states_for_training = h_states[:-1]
+            # next_hidden_state = h_states[-1]
 
-        # set the hidden state to use in the next training step
-        _, _, final_hidden_state, _ = self.tran((z_train_seq, self.hidden_state))
+            # add the current hidden state we saved to the start. This has h0, h1, h2, .. h=num_observations - 1
+            h_states_for_training = tf.concat([self.hidden_state, h_states_for_training], axis=0)
 
-        self.hidden_state = final_hidden_state
+            # use the hidden states with the pre and post observations to train transition model
+            self.tran.fit((z_train_singles, h_states_for_training), (post_latent_mean, post_latent_stddev), epochs=self.tran_train_epochs, verbose=verbose)
+
+            # now find the new predicted hidden state that we will use for finding the policy
+            # TODO not sure if I should pass the old hidden state or reset it to 0
+            # _, _, final_hidden_state, _ = self.tran((z_train_seq, self.hidden_state))
+            _, _, final_hidden_state, _ = self.tran((z_train_seq, None))
+
+            self.hidden_state = final_hidden_state
+
+        #### TRAIN THE VAE ####
+        if self.train_vae:
+            # train the vae model on post_observations because these are all new
+            self.model_vae.fit(post_observations, epochs=self.vae_train_epochs, verbose=verbose)
+
 
 
     def cem_policy_optimisation(self, z_t_minus_one):
@@ -157,6 +204,8 @@ class DAIFAgentRecurrent:
         else:
             cur_hidden_state = np.vstack([self.hidden_state]*self.n_policies)
 
+        # print(cur_hidden_state)
+
         # find the predicted latent states from the transition model
         for t in range(self.planning_horizon):
 
@@ -171,7 +220,7 @@ class DAIFAgentRecurrent:
             policy_posteriors.append(next_latent_mean)
             policy_sds.append(next_latent_sd)
 
-            next_likelihoods = self.dec(next_latent_mean)
+            next_likelihoods = self.model_vae.decoder(next_latent_mean)
             likelihoods.append(next_likelihoods)
 
             next_posterior_means, next_posteriors_sds, next_posteriors_z = self.model_vae.encoder(next_likelihoods)
@@ -185,7 +234,10 @@ class DAIFAgentRecurrent:
 
     def evaluate_policy(self, policy_posteriors, policy_sd, predicted_likelihood, predicted_posterior, predicted_posterior_sd):
 
-        return self.FEEF(policy_posteriors, policy_sd, predicted_likelihood, predicted_posterior, predicted_posterior_sd)
+        if self.use_FEEF:
+            return self.FEEF(policy_posteriors, policy_sd, predicted_likelihood, predicted_posterior, predicted_posterior_sd)
+        else:
+            return self.EFE(policy_posteriors, policy_sd, predicted_likelihood, predicted_posterior, predicted_posterior_sd)
 
 
     def FEEF(self, policy_posteriors_list, policy_sd_list, predicted_likelihood_list, predicted_posterior_list, predicted_posterior_sd_list):
@@ -212,28 +264,39 @@ class DAIFAgentRecurrent:
 
             # convert to normal distributions
             # TODO Why is the stddev 1s here? I think because we assume it is on the true state of the world.
-            likelihood_dist = tfp.distributions.MultivariateNormalDiag(loc=predicted_likelihood, scale_diag=np.ones_like(predicted_likelihood))
 
-            if self.prior_model is None:
+            if self.use_kl_extrinsic:
+                likelihood_dist = tfp.distributions.MultivariateNormalDiag(loc=predicted_likelihood, scale_diag=np.ones_like(predicted_likelihood))
 
-                # TODO how exactly is the prior defined? After you apply transformations what is the prior
-                # create the prior distribution
-                prior_preferences_mean = tf.convert_to_tensor(np.stack([self.given_prior_mean]*self.n_policies), dtype="float32")
-                prior_preferences_stddev = tf.convert_to_tensor(np.stack([self.given_prior_stddev]*self.n_policies), dtype="float32")
+                if self.prior_model is None:
 
-                prior_dist = tfp.distributions.MultivariateNormalDiag(loc=prior_preferences_mean, scale_diag=prior_preferences_stddev)
+                    # TODO how exactly is the prior defined? After you apply transformations what is the prior
+                    # create the prior distribution
+                    prior_preferences_mean = tf.convert_to_tensor(np.stack([self.given_prior_mean]*self.n_policies), dtype="float32")
+                    prior_preferences_stddev = tf.convert_to_tensor(np.stack([self.given_prior_stddev]*self.n_policies), dtype="float32")
 
-            # TODO Fix the learned prior model
+                    prior_dist = tfp.distributions.MultivariateNormalDiag(loc=prior_preferences_mean, scale_diag=prior_preferences_stddev)
+
+                # TODO Fix the learned prior model
+                else:
+                    prior_dist = self.prior_model()
+
+                kl_extrinsic = tfp.distributions.kl_divergence(likelihood_dist, prior_dist)
+
+            # if we don't use extrinsic set it to zero
             else:
-                prior_dist = self.prior_model()
-
-            kl_extrinsic = tfp.distributions.kl_divergence(likelihood_dist, prior_dist)
+                kl_extrinsic = tf.zeros(self.n_policies, dtype="float")
 
             # !!!! evaluate the KL INTRINSIC part !!!!
-            policy_posteriors_dist = tfp.distributions.MultivariateNormalDiag(loc=policy_posteriors, scale_diag=policy_sd)
-            predicted_posterior_dist = tfp.distributions.MultivariateNormalDiag(loc=predicted_posterior, scale_diag=predicted_posterior_sd)
+            if self.use_kl_intrinsic:
 
-            kl_intrinsic = tfp.distributions.kl_divergence(predicted_posterior_dist, policy_posteriors_dist)
+                policy_posteriors_dist = tfp.distributions.MultivariateNormalDiag(loc=policy_posteriors, scale_diag=policy_sd)
+                predicted_posterior_dist = tfp.distributions.MultivariateNormalDiag(loc=predicted_posterior, scale_diag=predicted_posterior_sd)
+
+                kl_intrinsic = tfp.distributions.kl_divergence(predicted_posterior_dist, policy_posteriors_dist)
+
+            else:
+                kl_intrinsic = tf.zeros(self.n_policies, dtype="float")
 
             FEEF = kl_extrinsic - kl_intrinsic
 
@@ -242,7 +305,8 @@ class DAIFAgentRecurrent:
         return FEEFs
 
 
-    def EFE(self, policy_posteriors, predicted_likelihood, predicted_posterior):
+    # TODO Find out how this works with the log probability extrinsic term
+    def EFE(self, policy_posteriors_list, policy_sd_list, predicted_likelihood_list, predicted_posterior_list, predicted_posterior_sd_list):
         """
         Compute the EFE for policy selection
         :param policy_posteriors:
@@ -250,4 +314,59 @@ class DAIFAgentRecurrent:
         :param predicted_posterior:
         :return:
         """
-        pass
+
+        EFEs = []
+
+        for t in range(self.planning_horizon):
+
+            # extract the values for each time step
+            predicted_likelihood = predicted_likelihood_list[t]
+            policy_posteriors = policy_posteriors_list[t]
+            policy_sd = policy_sd_list[t]
+            predicted_posterior = predicted_posterior_list[t]
+            predicted_posterior_sd = predicted_posterior_sd_list[t]
+
+            # !!!! evaluate the EXTRINSIC KL divergence !!!!
+
+            # convert to normal distributions
+            # TODO Why is the stddev 1s here? I think because we assume it is on the true state of the world.
+
+            if self.use_kl_extrinsic:
+                likelihood_dist = tfp.distributions.MultivariateNormalDiag(loc=predicted_likelihood, scale_diag=np.ones_like(predicted_likelihood))
+
+                if self.prior_model is None:
+
+                    # TODO how exactly is the prior defined? After you apply transformations what is the prior
+                    # create the prior distribution
+                    prior_preferences_mean = tf.convert_to_tensor(np.stack(self.given_prior_mean), dtype="float32")
+                    prior_preferences_stddev = tf.convert_to_tensor(np.stack(self.given_prior_stddev), dtype="float32")
+
+                    prior_dist = tfp.distributions.MultivariateNormalDiag(loc=prior_preferences_mean, scale_diag=prior_preferences_stddev)
+
+                # TODO Fix the learned prior model
+                else:
+                    prior_dist = self.prior_model()
+
+                # compute extrinsic surprisal term
+                surprisal = -1 * tf.math.log(prior_dist.prob(predicted_likelihood))
+
+            # if we don't use extrinsic set it to zero
+            else:
+                surprisal = tf.zeros(self.n_policies, dtype="float")
+
+            # !!!! evaluate the KL INTRINSIC part !!!!
+            if self.use_kl_intrinsic:
+
+                policy_posteriors_dist = tfp.distributions.MultivariateNormalDiag(loc=policy_posteriors, scale_diag=policy_sd)
+                predicted_posterior_dist = tfp.distributions.MultivariateNormalDiag(loc=predicted_posterior, scale_diag=predicted_posterior_sd)
+
+                kl_intrinsic = tfp.distributions.kl_divergence(predicted_posterior_dist, policy_posteriors_dist)
+
+            else:
+                kl_intrinsic = tf.zeros(self.n_policies, dtype="float")
+
+            EFE = surprisal - kl_intrinsic
+
+            EFEs.append(EFE)
+
+        return EFEs
