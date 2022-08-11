@@ -48,10 +48,12 @@ def transform_observations(observations, observation_max, observation_min, noise
 
     observations_scaled = (observations - observation_min)/(observation_max - observation_min)
 
+    observations_scaled = 2*observations_scaled - 1
+
     # add noise
     observation_noisy = observations_scaled + np.random.normal(loc=0, scale=noise_stddev, size=observations_scaled.shape)
 
-    observations_clipped = np.clip(observation_noisy, 0, 1)
+    observations_clipped = np.clip(observation_noisy, -1, 1)
 
     return observations_clipped
 

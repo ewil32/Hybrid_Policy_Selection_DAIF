@@ -42,14 +42,14 @@ def create_decoder(latent_dim, input_dim, hidden_units=[16, 8]):
     for n in hidden_units:
         x = layers.Dense(n, activation="silu")(x)
 
-    decoder_outputs = layers.Dense(input_dim, activation="sigmoid")(x)
+    decoder_outputs = layers.Dense(input_dim)(x)
     decoder = keras.Model(latent_inputs, decoder_outputs, name="decoder")
 
     return decoder
 
 
 class VAE(keras.Model):
-    def __init__(self, encoder, decoder, reg_mean, reg_stddev, llik_scaling=1, kl_scaling=1, **kwargs):
+    def __init__(self, encoder, decoder, reg_mean, reg_stddev, recon_stddev=0.05, llik_scaling=1, kl_scaling=1, **kwargs):
         super(VAE, self).__init__(**kwargs)
         self.encoder = encoder
         self.decoder = decoder
@@ -61,6 +61,8 @@ class VAE(keras.Model):
 
         self.reg_mean = reg_mean
         self.reg_stddev = reg_stddev
+
+        self.reconstruction_stddev = recon_stddev
 
         self.llik_scaling = llik_scaling
         self.kl_scaling = kl_scaling
@@ -78,6 +80,7 @@ class VAE(keras.Model):
         reconstruction = self.decoder(z)
         return reconstruction
 
+
     def train_step(self, data):
 
         # unpack data
@@ -87,15 +90,16 @@ class VAE(keras.Model):
         with tf.GradientTape() as tape:
             z_mean, z_stddev, z = self.encoder(x)
             reconstruction = self.decoder(z)
-            reconstruction_loss = keras.losses.binary_crossentropy(x, reconstruction) * self.llik_scaling  # need scaling to stop collapse
 
-            # if reg_vals is None:  # we regularise against standard guassian
-            #     kl_loss = -tf.math.log(z_stddev) + 0.5 * (tf.square(z_stddev) + tf.square(z_mean) - 1)
-            #
-            # else:  # regularise against the given distributions
-            #     pred_dist = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_stddev)
-            #     reg_dist = tfp.distributions.MultivariateNormalDiag(loc=reg_mean, scale_diag=reg_stddev)
-            #     kl_loss = tfp.distributions.kl_divergence(reg_dist, pred_dist)
+            # TODO why is it not this? Why should it be log prob instead?
+            # reconstruction_loss = keras.losses.binary_crossentropy(x, reconstruction) * self.llik_scaling  # need scaling to stop collapse
+
+            # TODO fix this because it seems totally wrong
+            # prob dist of reconstruction and log prob of obs under this distribution
+            # reconstruction_dist = tfp.distributions.MultivariateNormalDiag(loc=reconstruction, scale_diag=tf.ones_like(reconstruction) * self.reconstruction_stddev)
+            # reconstruction_loss = -1 * reconstruction_dist.log_prob(x)
+
+            reconstruction_loss = nll_gaussian(reconstruction, x, self.reconstruction_stddev**2, use_consts=False) * self.llik_scaling
 
             posterior_dist = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_stddev)
             reg_dist = tfp.distributions.MultivariateNormalDiag(loc=self.reg_mean, scale_diag=self.reg_stddev)
@@ -113,3 +117,14 @@ class VAE(keras.Model):
             "reconstruction_loss": self.reconstruction_loss_tracker.result(),
             "kl_loss": self.kl_loss_tracker.result(),
         }
+
+
+def nll_gaussian(pred, target, variance, use_consts=True):
+
+    neg_log_prob = ((pred - target)**2/(2*variance))
+
+    if use_consts:
+        const = 0.5*np.log(2*np.pi*variance)
+        neg_log_prob += const
+
+    return tf.reduce_sum(neg_log_prob, axis=1)

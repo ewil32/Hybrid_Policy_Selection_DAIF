@@ -1,4 +1,12 @@
-def run_episode(mcc_env, agent, obs_max, obs_min, observation_noise_stddev=[0.05, 0.05], action_repeats=6, num_actions_to_execute=2, episode_length=1000):
+import numpy as np
+# import gym
+import pandas as pd
+import tensorflow as tf
+
+from util import transform_observations
+
+
+def run_episode(mcc_env, agent, obs_max, obs_min, observation_noise_stddev=[0.05, 0.05], action_repeats=6, num_actions_to_execute=2):
 
     # arrays to store observations, actions and rewards
     all_pre_observations = []
@@ -47,6 +55,7 @@ def run_episode(mcc_env, agent, obs_max, obs_min, observation_noise_stddev=[0.05
                 t += 1
                 if done:
                     if t < 999:
+                        print(policy_observation)
                         print(policy.mean())
                     return t < 999, agent, t, all_pre_observations, all_post_observations, all_action # the max for the environment
 
@@ -58,6 +67,8 @@ def run_episode(mcc_env, agent, obs_max, obs_min, observation_noise_stddev=[0.05
         # get the noisy observations for pre and post actions
         pre_observation_sequence = np.vstack([policy_observation, observation_sequence[:-1]])
         post_action_observation_sequence = observation_sequence
+
+        # print(post_action_observation_sequence)
 
         all_pre_observations.append(pre_observation_sequence)
         all_post_observations.append(post_action_observation_sequence)
@@ -87,19 +98,21 @@ def run_episode(mcc_env, agent, obs_max, obs_min, observation_noise_stddev=[0.05
 
 def train_agent(mcc_env, agent, obs_max, obs_min, observation_noise_stddev, action_repeats, num_actions_to_execute, episode_length=1000, num_episodes=100):
 
-    time_to_success = []
-    did_succeed = []
+    # Set up to store in pandas frame
+    cols = ["episode", "success", "sim_steps", "noise_stddev"]
+    rows = []
 
     for n in range(num_episodes):
         print("Episode", n+1)
         success, agent, t, *rest = run_episode(mcc_env, agent, obs_max, obs_min, observation_noise_stddev, action_repeats=action_repeats, num_actions_to_execute=num_actions_to_execute)
 
-        did_succeed.append(success)
-        time_to_success.append(t)
+        rows.append(dict(zip(cols, [n, success, t, observation_noise_stddev])))
 
         if success:
             print("Success in episode", n+1, "at time step", t)
         else:
             print("No Success")
 
-    return agent, did_succeed, time_to_success
+    results = pd.DataFrame(rows, columns=cols)
+
+    return agent, results

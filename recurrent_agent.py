@@ -13,22 +13,25 @@ class DAIFAgentRecurrent:
                  tran,
                  given_prior_mean,
                  given_prior_stddev,
+                 agent_time_ratio=6,
                  planning_horizon=15,
                  n_policies=1500,
                  n_cem_policy_iterations=2,
                  n_policy_candidates=70,
                  tran_train_epochs=1,
                  vae_train_epochs=1,
-                 agent_time_ratio=6,
                  train_vae=True,
                  train_tran=True,
+                 train_prior_model=False,
                  use_kl_extrinsic=True,
                  use_kl_intrinsic=True,
-                 use_FEEF=True):
+                 use_FEEF=True,
+                 show_vae_training=False,
+                 show_tran_training=False,
+                 show_prior_training=False):
 
         super(DAIFAgentRecurrent, self).__init__()
 
-        self.prior_model = prior_model
         self.planning_horizon = planning_horizon
         self.n_policy_candidates = n_policy_candidates
         self.n_policies = n_policies
@@ -52,13 +55,20 @@ class DAIFAgentRecurrent:
         # full vae
         self.model_vae = vae
         self.model_vae.compile(optimizer=tf.keras.optimizers.Adam())
+        self.show_vae_training = show_vae_training
 
         # transition
         # takes action plus last state and outputs next latent state
         self.tran = tran
         self.tran.compile(optimizer=tf.keras.optimizers.Adam())
-
+        self.show_tran_training = show_tran_training
+        # track the hidden state of the transition gru model
         self.hidden_state = None
+
+        # Prior model
+        self.prior_model = prior_model
+        self.train_prior = train_prior_model
+        self.show_prior_training = show_prior_training
 
         # how much is the agents planning time compressed compared to the simulation time
         self.agent_time_ratio = agent_time_ratio
@@ -125,7 +135,7 @@ class DAIFAgentRecurrent:
             h_states_for_training = tf.concat([self.hidden_state, h_states_for_training], axis=0)
 
             # use the hidden states with the pre and post observations to train transition model
-            self.tran.fit((z_train_singles, h_states_for_training), (post_latent_mean, post_latent_stddev), epochs=self.tran_train_epochs, verbose=verbose)
+            self.tran.fit((z_train_singles, h_states_for_training), (post_latent_mean, post_latent_stddev), epochs=self.tran_train_epochs, verbose=self.show_tran_training)
 
             # now find the new predicted hidden state that we will use for finding the policy
             # TODO not sure if I should pass the old hidden state or reset it to 0
@@ -137,8 +147,11 @@ class DAIFAgentRecurrent:
         #### TRAIN THE VAE ####
         if self.train_vae:
             # train the vae model on post_observations because these are all new
-            self.model_vae.fit(post_observations, epochs=self.vae_train_epochs, verbose=verbose)
+            self.model_vae.fit(pre_observations, epochs=self.vae_train_epochs, verbose=self.show_vae_training)
 
+        #### TRAIN THE PRIOR MODEL ####
+        if self.train_prior:
+            self.prior_model.train(post_observations, rewards, verbose=self.show_prior_training)
 
 
     def cem_policy_optimisation(self, z_t_minus_one):
@@ -277,11 +290,12 @@ class DAIFAgentRecurrent:
 
                     prior_dist = tfp.distributions.MultivariateNormalDiag(loc=prior_preferences_mean, scale_diag=prior_preferences_stddev)
 
-                # TODO Fix the learned prior model
-                else:
-                    prior_dist = self.prior_model()
+                    kl_extrinsic = tfp.distributions.kl_divergence(likelihood_dist, prior_dist)
 
-                kl_extrinsic = tfp.distributions.kl_divergence(likelihood_dist, prior_dist)
+                # Compute the extrinisc approximation with the prior model
+                else:
+                    kl_extrinsic = self.prior_model.extrinsic_kl(predicted_likelihood)
+                    kl_extrinsic = tf.reduce_sum(kl_extrinsic, axis=-1)
 
             # if we don't use extrinsic set it to zero
             else:
@@ -343,9 +357,10 @@ class DAIFAgentRecurrent:
 
                     prior_dist = tfp.distributions.MultivariateNormalDiag(loc=prior_preferences_mean, scale_diag=prior_preferences_stddev)
 
-                # TODO Fix the learned prior model
+                # TODO Can I use the learned prior model here?
                 else:
-                    prior_dist = self.prior_model()
+                    pass
+                    # prior_dist = self.prior_model()
 
                 # compute extrinsic surprisal term
                 surprisal = -1 * tf.math.log(prior_dist.prob(predicted_likelihood))
