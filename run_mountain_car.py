@@ -6,7 +6,7 @@ import tensorflow as tf
 from util import transform_observations
 
 
-def run_episode(mcc_env, agent, obs_max, obs_min, observation_noise_stddev=[0.05, 0.05], action_repeats=6, num_actions_to_execute=2):
+def run_episode(mcc_env, agent, obs_max, obs_min, observation_noise_stddev=[0.05, 0.05], action_repeats=6, num_actions_to_execute=2, train_on_full_data=True):
 
     # arrays to store observations, actions and rewards
     all_pre_observations = []
@@ -57,6 +57,13 @@ def run_episode(mcc_env, agent, obs_max, obs_min, observation_noise_stddev=[0.05
                     if t < 999:
                         print(policy_observation)
                         print(policy.mean())
+
+                    # train on final full data run
+
+                    if train_on_full_data:
+                        all_post_observations = np.vstack(all_post_observations)
+                        agent.model_vae.fit(all_post_observations, epochs=2)
+
                     return t < 999, agent, t, all_pre_observations, all_post_observations, all_action # the max for the environment
 
         actions_executed = np.array(actions_executed).reshape((len(actions_executed), agent.tran.action_dim))
@@ -96,15 +103,16 @@ def run_episode(mcc_env, agent, obs_max, obs_min, observation_noise_stddev=[0.05
     env.close()
 
 
-def train_agent(mcc_env, agent, obs_max, obs_min, observation_noise_stddev, action_repeats, num_actions_to_execute, episode_length=1000, num_episodes=100):
+def train_agent(mcc_env, agent, obs_max, obs_min, observation_noise_stddev, action_repeats, num_actions_to_execute, num_episodes=100, train_on_full_data=True):
 
     # Set up to store in pandas frame
     cols = ["episode", "success", "sim_steps", "noise_stddev"]
     rows = []
 
+
     for n in range(num_episodes):
         print("Episode", n+1)
-        success, agent, t, *rest = run_episode(mcc_env, agent, obs_max, obs_min, observation_noise_stddev, action_repeats=action_repeats, num_actions_to_execute=num_actions_to_execute)
+        success, agent, t, *rest = run_episode(mcc_env, agent, obs_max, obs_min, observation_noise_stddev, action_repeats=action_repeats, num_actions_to_execute=num_actions_to_execute, train_on_full_data=train_on_full_data)
 
         rows.append(dict(zip(cols, [n, success, t, observation_noise_stddev])))
 

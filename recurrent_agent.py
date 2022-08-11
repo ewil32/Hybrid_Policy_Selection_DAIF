@@ -85,7 +85,8 @@ class DAIFAgentRecurrent:
     def train(self, pre_observations_raw, post_observations_raw, actions_complete, rewards, verbose=0):
 
         # compress the observations based on the agents time compression factor
-        # pre_observations = pre_observations_raw[::self.agent_time_ratio]  # for example take every 6th element
+        pre_observations = pre_observations_raw[::self.agent_time_ratio]  # for example take every 6th element
+        post_observations = np.flip(np.flip(post_observations_raw)[::self.agent_time_ratio])  # ends up at element
         # post_observations = np.array([post_observations_raw[i] for i in range(len(post_observations_raw)) if i % self.agent_time_ratio == self.agent_time_ratio - 1])
         #
         # print(pre_observations_raw)
@@ -93,8 +94,8 @@ class DAIFAgentRecurrent:
         # print(post_observations_raw)
         # print(post_observations)
 
-        pre_observations = pre_observations_raw
-        post_observations = post_observations_raw
+        # pre_observations = pre_observations_raw
+        # post_observations = post_observations_raw
 
         #### TRAIN THE TRANSITION MODEL ####
         if self.train_tran:
@@ -139,19 +140,24 @@ class DAIFAgentRecurrent:
 
             # now find the new predicted hidden state that we will use for finding the policy
             # TODO not sure if I should pass the old hidden state or reset it to 0
-            # _, _, final_hidden_state, _ = self.tran((z_train_seq, self.hidden_state))
-            _, _, final_hidden_state, _ = self.tran((z_train_seq, None))
+            _, _, final_hidden_state, _ = self.tran((z_train_seq, self.hidden_state))
+            # _, _, final_hidden_state, _ = self.tran((z_train_seq, None))
 
             self.hidden_state = final_hidden_state
 
         #### TRAIN THE VAE ####
         if self.train_vae:
             # train the vae model on post_observations because these are all new
+            # self.model_vae.fit(pre_observations_raw, epochs=self.vae_train_epochs, verbose=self.show_vae_training)
             self.model_vae.fit(pre_observations, epochs=self.vae_train_epochs, verbose=self.show_vae_training)
+
+            # print("true", pre_observations)
+            # print("pred", self.model_vae(pre_observations))
 
         #### TRAIN THE PRIOR MODEL ####
         if self.train_prior:
-            self.prior_model.train(post_observations, rewards, verbose=self.show_prior_training)
+            # self.prior_model.train(post_observations, rewards, verbose=self.show_prior_training)
+            self.prior_model.train(post_observations_raw, rewards, verbose=self.show_prior_training)
 
 
     def cem_policy_optimisation(self, z_t_minus_one):
@@ -357,17 +363,17 @@ class DAIFAgentRecurrent:
 
                     prior_dist = tfp.distributions.MultivariateNormalDiag(loc=prior_preferences_mean, scale_diag=prior_preferences_stddev)
 
+                    # compute extrinsic prior preferences term
+                    efe_extrinsic = -1 * tf.math.log(prior_dist.prob(predicted_likelihood))
+
                 # TODO Can I use the learned prior model here?
                 else:
-                    pass
-                    # prior_dist = self.prior_model()
-
-                # compute extrinsic surprisal term
-                surprisal = -1 * tf.math.log(prior_dist.prob(predicted_likelihood))
+                    efe_extrinsic = self.prior_model.extrinsic_kl(predicted_likelihood)
+                    efe_extrinsic = tf.reduce_sum(efe_extrinsic, axis=-1)
 
             # if we don't use extrinsic set it to zero
             else:
-                surprisal = tf.zeros(self.n_policies, dtype="float")
+                efe_extrinsic = tf.zeros(self.n_policies, dtype="float")
 
             # !!!! evaluate the KL INTRINSIC part !!!!
             if self.use_kl_intrinsic:
@@ -380,7 +386,7 @@ class DAIFAgentRecurrent:
             else:
                 kl_intrinsic = tf.zeros(self.n_policies, dtype="float")
 
-            EFE = surprisal - kl_intrinsic
+            EFE = efe_extrinsic - kl_intrinsic
 
             EFEs.append(EFE)
 
