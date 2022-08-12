@@ -2,7 +2,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 import numpy as np
 
-from vae_recurrent import VAE
+# from vae_recurrent import VAE
 
 
 class DAIFAgentRecurrent:
@@ -74,14 +74,6 @@ class DAIFAgentRecurrent:
         self.agent_time_ratio = agent_time_ratio
 
 
-    def select_policy(self, observation):
-
-        policy_mean, policy_stddev = self.cem_policy_optimisation(observation)
-
-        # return a distribution that we can sample from
-        return tfp.distributions.MultivariateNormalDiag(loc=policy_mean, scale_diag=policy_stddev)
-
-
     def train(self, pre_observations_raw, post_observations_raw, actions_complete, rewards, verbose=0):
 
         # compress the observations based on the agents time compression factor
@@ -105,6 +97,8 @@ class DAIFAgentRecurrent:
             num_observations = pre_observations.shape[0]
             observation_dim = pre_observations.shape[1]
             action_dim = actions.shape[1]
+            latent_dim = self.model_vae.latent_dim
+
             # action_dim = 1  # TODO fix this to allow different actions
 
             # find the actual observed latent states using the vae
@@ -115,8 +109,8 @@ class DAIFAgentRecurrent:
             z_train = np.concatenate([np.array(pre_latent_mean), np.array(actions)], axis=1)
 
             # we use the sequence to find the right hidden states to use as input
-            z_train_seq = z_train.reshape((1, num_observations, observation_dim + action_dim))
-            z_train_singles = z_train.reshape(num_observations, 1, observation_dim + action_dim)
+            z_train_seq = z_train.reshape((1, num_observations, latent_dim + action_dim))
+            z_train_singles = z_train.reshape(num_observations, 1, latent_dim + action_dim)
 
             # the previous hidden state is the memory after observing some sequences but it might be None
             if self.hidden_state is None:
@@ -158,6 +152,21 @@ class DAIFAgentRecurrent:
         if self.train_prior:
             # self.prior_model.train(post_observations, rewards, verbose=self.show_prior_training)
             self.prior_model.train(post_observations_raw, rewards, verbose=self.show_prior_training)
+
+
+    def select_policy(self, observation):
+
+        # TODO do you take the mean or that latent here?
+        # get the latent state from this observation
+        _,  _, latent_state = self.model_vae.encoder(observation.reshape(1, observation.shape[0]))
+        # latent_state = latent_state.numpy().reshape((1, latent_state.shape[0]))
+
+        # print(latent_state)
+        # select the policy
+        policy_mean, policy_stddev = self.cem_policy_optimisation(latent_state)
+
+        # return a distribution that we can sample from
+        return tfp.distributions.MultivariateNormalDiag(loc=policy_mean, scale_diag=policy_stddev)
 
 
     def cem_policy_optimisation(self, z_t_minus_one):
@@ -207,8 +216,8 @@ class DAIFAgentRecurrent:
         :return:
         """
 
-        # stack up the new observation to have shape [self.n_policies, len(z_t_minus_one)]
-        prev_latent_mean = np.stack([z_t_minus_one]*self.n_policies)
+        # stack up the new observation to have shape (self.n_policies, latent_dim) when z_t_minus is tensor with shape (1, latent_dim
+        prev_latent_mean = tf.squeeze(tf.stack([z_t_minus_one]*self.n_policies, axis=1))
 
         policy_posteriors = []
         policy_sds = []
@@ -228,8 +237,12 @@ class DAIFAgentRecurrent:
         # find the predicted latent states from the transition model
         for t in range(self.planning_horizon):
 
+            # print(prev_latent_mean)
+
             ob_plus_action = np.concatenate([prev_latent_mean, policies[:, t].reshape(self.n_policies, 1)], axis=1)
             tran_input = ob_plus_action.reshape((self.n_policies, 1, ob_plus_action.shape[1]))  # reshape to pass to GRU
+
+            # print(tran_input)
 
             next_latent_mean, next_latent_sd, next_hidden_state, _ = self.tran((tran_input, cur_hidden_state))  # shape = [num policies, latent dim
 

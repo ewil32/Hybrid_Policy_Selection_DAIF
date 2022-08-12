@@ -17,7 +17,7 @@ class Sampling(layers.Layer):
         return z_mean + z_stddev * epsilon
 
 
-def create_encoder(latent_dim, input_dim, hidden_units=[16, 8]):
+def create_encoder(input_dim, latent_dim, hidden_units=[16, 8]):
 
     encoder_inputs = keras.Input(shape=input_dim)
 
@@ -34,7 +34,7 @@ def create_encoder(latent_dim, input_dim, hidden_units=[16, 8]):
     return encoder
 
 
-def create_decoder(latent_dim, input_dim, hidden_units=[16, 8]):
+def create_decoder(latent_dim, output_dim, hidden_units=[16, 8]):
 
     latent_inputs = keras.Input(shape=(latent_dim,))
 
@@ -42,14 +42,14 @@ def create_decoder(latent_dim, input_dim, hidden_units=[16, 8]):
     for n in hidden_units:
         x = layers.Dense(n, activation="silu")(x)
 
-    decoder_outputs = layers.Dense(input_dim)(x)
+    decoder_outputs = layers.Dense(output_dim)(x)
     decoder = keras.Model(latent_inputs, decoder_outputs, name="decoder")
 
     return decoder
 
 
 class VAE(keras.Model):
-    def __init__(self, encoder, decoder, reg_mean, reg_stddev, recon_stddev=0.05, llik_scaling=1, kl_scaling=1, **kwargs):
+    def __init__(self, encoder, decoder, latent_dim, reg_mean, reg_stddev, recon_stddev=0.05, llik_scaling=1, kl_scaling=1, **kwargs):
         super(VAE, self).__init__(**kwargs)
         self.encoder = encoder
         self.decoder = decoder
@@ -58,6 +58,8 @@ class VAE(keras.Model):
             name="reconstruction_loss"
         )
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
+
+        self.latent_dim = latent_dim
 
         self.reg_mean = reg_mean
         self.reg_stddev = reg_stddev

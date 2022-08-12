@@ -6,7 +6,7 @@ from prior_model import PriorModelBellman
 
 # gym imports and training
 import gym
-from run_mountain_car import train_agent
+from train_agent import train_agent
 
 # utility
 from util import transform_observations
@@ -65,7 +65,7 @@ def experiment_feef_with_prior_model(agent_id, return_dict):
 
     enc = create_encoder(2, 2, [20])
     dec = create_decoder(2, 2, [20])
-    vae = VAE(enc, dec, [0, 0], [0.3, 0.3], llik_scaling=10000)
+    vae = VAE(enc, dec, [0, 0], [0.3, 0.3], llik_scaling=1)
 
     tran = TransitionGRU(2, 1, 12, 20, 2)
 
@@ -93,7 +93,7 @@ def experiment_feef_with_prior_model(agent_id, return_dict):
 
     # train the agent on the env
     env = gym.make('MountainCarContinuous-v0')
-    agent, results = train_agent(env, daifa, observation_max, observation_min, observation_noise_stddev, num_episodes=100, action_repeats=6, num_actions_to_execute=2)
+    agent, results = train_agent(env, daifa, observation_max, observation_min, observation_noise_stddev, num_episodes=40, action_repeats=6, num_actions_to_execute=2)
 
     # add a column with agent id
     results["agent_num"] = agent_id
