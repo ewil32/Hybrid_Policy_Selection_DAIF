@@ -2,9 +2,9 @@ import numpy as np
 
 def random_observation_sequence(env, length, epsilon=0.5):
 
-    observation, info = env.reset()
+    observation = env.reset()
 
-    observations = [np.array([observation, 0])]
+    observations = [observation]
     actions = []
     rewards = []
 
@@ -16,7 +16,7 @@ def random_observation_sequence(env, length, epsilon=0.5):
         if np.random.uniform(0, 1) < epsilon:
             action = env.action_space.sample()
 
-        observation, reward, done, info = env.step(action)
+        observation, reward, done, *rest = env.step(action)
 
         actions.append(action)
         observations.append(observation)
@@ -56,47 +56,3 @@ def transform_observations(observations, observation_max, observation_min, noise
     observations_clipped = np.clip(observation_noisy, -1, 1)
 
     return observations_clipped
-
-
-
-
-
-# def random_observation_sequence(env, length, num_samples):
-#
-#     sequences = []
-#     rewards = []
-#     actions = []
-#
-#     for i in range(num_samples):
-#
-#         observation, info = env.reset()
-#
-#         this_sequence = [observation]
-#         this_rewards = []
-#         this_actions = []
-#
-#         for j in range(length):
-#
-#             action = env.action_space.sample()
-#
-#             observation, reward, done, info = env.step(action)
-#
-#             print(observation, reward, done, info)
-#             this_actions.append(actions)
-#             this_sequence.append(observation)
-#             this_rewards.append(reward)
-#
-#             # pad the end
-#             if done:
-#                 for j in range(length - j):
-#                     this_actionsactions.append(None)
-#                     this_sequencesequence.append(None)
-#                     this_rewards.append(None)
-#
-#         sequences.append(this_sequence)
-#         rewards.append(this_rewards)
-#         actions.append(this_actions)
-#
-#     env.close()
-#
-#     return np.array(sequences), np.array(actions), np.array(rewards)

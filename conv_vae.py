@@ -17,7 +17,7 @@ class Sampling(layers.Layer):
         return z_mean + z_stddev * epsilon
 
 
-def create_conv_encoder(input_dim, latent_dim, conv_shapes=[3, 3,  3], num_filters=[32, 64, 64], dense_units=[16]):
+def create_conv_encoder(input_dim, latent_dim, conv_shapes=[3, 3, 3], num_filters=[32, 64, 64], dense_units=[16]):
 
     encoder_inputs = keras.Input(shape=input_dim)
 
@@ -41,7 +41,7 @@ def create_conv_encoder(input_dim, latent_dim, conv_shapes=[3, 3,  3], num_filte
     return encoder
 
 
-def create_conv_decoder(latent_dim, output_shape, conv_shapes=[3, 3, 3], num_filters=[64, 64, 32], dense_units=[16], rgb=True):
+def create_conv_decoder(latent_dim, output_shape, deconv_shapes=[3, 3, 3], num_filters=[64, 64, 32], dense_units=[16], rgb=True):
 
     latent_inputs = keras.Input(shape=(latent_dim,))
 
@@ -50,11 +50,11 @@ def create_conv_decoder(latent_dim, output_shape, conv_shapes=[3, 3, 3], num_fil
     for d in dense_units:
         x = layers.Dense(d, activation="relu")(x)
 
-    first_shape = (conv_shapes[0], conv_shapes[0], num_filters[0])
+    first_shape = (deconv_shapes[0], deconv_shapes[0], num_filters[0])
     x = layers.Reshape(first_shape)(x)
 
-    for n in range(len(conv_shapes)):
-        filter_shape = conv_shapes[n]
+    for n in range(len(deconv_shapes)):
+        filter_shape = deconv_shapes[n]
         num = num_filters[n]
         x = layers.Conv2DTranspose(num, filter_shape, activation="relu", strides=2, padding="same")(x)
 
@@ -114,7 +114,7 @@ class ConvVAE(keras.Model):
             reconstruction = self.decoder(z)
 
             # TODO Fix this to be a real loss function
-            reconstruction_loss = nll_gaussian(reconstruction, x, use_consts=False)
+            reconstruction_loss = nll_gaussian(reconstruction, x, self.reconstruction_stddev, use_consts=False)
 
             posterior_dist = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_stddev)
             reg_dist = tfp.distributions.MultivariateNormalDiag(loc=self.reg_mean, scale_diag=self.reg_stddev)
