@@ -82,6 +82,20 @@ class VAE(keras.Model):
         reconstruction = self.decoder(z)
         return reconstruction
 
+    def compute_loss(self, x=None):
+        z_mean, z_stddev, z = self.encoder(x)
+        reconstruction = self.decoder(z)
+
+        reconstruction_loss = nll_gaussian(reconstruction, x, self.reconstruction_stddev**2, use_consts=False) * self.llik_scaling
+
+        posterior_dist = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_stddev)
+        reg_dist = tfp.distributions.MultivariateNormalDiag(loc=self.reg_mean, scale_diag=self.reg_stddev)
+        kl_loss = tfp.distributions.kl_divergence(posterior_dist, reg_dist) * self.kl_scaling
+
+        # kl_loss = tf.reduce_sum(kl_loss, axis=1)
+        total_loss = reconstruction_loss + kl_loss
+        return total_loss
+
 
     def train_step(self, data):
 

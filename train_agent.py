@@ -14,10 +14,12 @@ def train_single_agent(mcc_env,
                        action_repeats,
                        num_actions_to_execute,
                        num_episodes=100,
-                       train_on_full_data=True):
+                       train_on_full_data=True,
+                       show_replay_training=False,
+                       replay_train_epochs=2):
 
     # Set up to store results in pandas frame
-    cols = ["episode", "success", "sim_steps", "noise_stddev"]
+    cols = ["episode", "success", "sim_steps", "VFE_post_run", "noise_stddev"]
     rows = []
 
     for n in range(num_episodes):
@@ -80,10 +82,15 @@ def train_single_agent(mcc_env,
                     else:
                         success = False
 
+                    # get a full observations set
+                    all_post_observations = np.vstack(all_post_observations)
+
                     # should we train on final full data run
                     if train_on_full_data:
-                        all_post_observations = np.vstack(all_post_observations)
-                        agent.model_vae.fit(all_post_observations, epochs=2)
+                        agent.model_vae.fit(all_post_observations, epochs=replay_train_epochs, verbose=show_replay_training)
+
+                    # get the VFE of the model for the run
+                    VFE = float(tf.reduce_mean(agent.model_vae.compute_loss(all_post_observations)))
 
                     # finally break free from the loop
                     break
@@ -124,7 +131,7 @@ def train_single_agent(mcc_env,
                 reward_sequence = []
                 actions_executed = []
 
-        rows.append(dict(zip(cols, [n, success, t, observation_noise_stddev])))
+        rows.append(dict(zip(cols, [n, success, t, VFE, observation_noise_stddev])))
 
         if success:
             print("Success in episode", n+1, "at time step", t)
