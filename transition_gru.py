@@ -49,6 +49,21 @@ class TransitionGRU(keras.Model):
             initial_state = np.zeros((x.shape[0], self.hidden_units))  # start as zeros with number of examples times hidden dimension
         return self.transition_model([x] + [initial_state])
 
+    def compute_loss(self, inputs, targets):
+
+        x, init_states = inputs
+        mu, stddev = targets
+
+        z_mean, z_stddev, final_state, h_states = self.transition_model([x, init_states])  # Forward pass
+
+        # Compute the loss value
+        pred_dist = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_stddev)
+        true_dist = tfp.distributions.MultivariateNormalDiag(loc=mu, scale_diag=stddev)
+
+        # TODO make sure this is the correct order of terms
+        kl_loss = tfp.distributions.kl_divergence(pred_dist, true_dist)
+        return kl_loss
+
 
     @property
     def metrics(self):
