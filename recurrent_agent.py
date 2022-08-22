@@ -11,6 +11,7 @@ class DAIFAgentRecurrent:
                  prior_model,
                  vae,
                  tran,
+                 habitual_action_net,
                  given_prior_mean,
                  given_prior_stddev,
                  agent_time_ratio=6,
@@ -20,15 +21,18 @@ class DAIFAgentRecurrent:
                  n_policy_candidates=70,
                  tran_train_epochs=1,
                  vae_train_epochs=1,
+                 habit_train_epochs=1,
                  train_vae=True,
                  train_tran=True,
                  train_prior_model=False,
+                 train_habit_net=False,
                  use_kl_extrinsic=True,
                  use_kl_intrinsic=True,
                  use_FEEF=True,
                  show_vae_training=False,
                  show_tran_training=False,
-                 show_prior_training=False):
+                 show_prior_training=False,
+                 show_habit_training=False):
 
         super(DAIFAgentRecurrent, self).__init__()
 
@@ -39,8 +43,10 @@ class DAIFAgentRecurrent:
 
         self.vae_train_epochs = vae_train_epochs
         self.tran_train_epochs = tran_train_epochs
+        self.train_habit_net = train_habit_net
         self.train_vae = train_vae
         self.train_tran = train_tran
+        self.habit_train_epochs = habit_train_epochs
 
         # do we use the kl divergence for extrinsic vs intrinsic
         self.use_kl_intrinsic = use_kl_intrinsic
@@ -70,36 +76,63 @@ class DAIFAgentRecurrent:
         self.train_prior = train_prior_model
         self.show_prior_training = show_prior_training
 
+
+        # habitual action model
+        self.habit_action_model = habitual_action_net
+        self.habit_action_model.compile(optimizer=tf.keras.optimizers.Adam())
+        self.show_habit_training = show_habit_training
+
         # how much is the agents planning time compressed compared to the simulation time
         self.agent_time_ratio = agent_time_ratio
 
 
-    def train(self, pre_observations_raw, post_observations_raw, actions_complete, rewards, verbose=0):
+    # We use this function to reset the hidden state of the transition model when we want to train on the full data set
+    def reset_tran_hidden_state(self):
+        self.hidden_state = None
+
+
+    def train(self,
+              pre_observations_raw,
+              post_observations_raw,
+              actions_complete,
+              rewards,
+              train_vae=True,
+              train_tran=True,
+              train_prior=True,
+              train_habit=True):
+
+
+        # If we the episode terminates then pre observations and post obersvations raw could be any length but
+
 
         # compress the observations based on the agents time compression factor
         pre_observations = pre_observations_raw[::self.agent_time_ratio]  # for example take every 6th element
-        post_observations = np.flip(np.flip(post_observations_raw)[::self.agent_time_ratio])  # ends up at element
-        # post_observations = np.array([post_observations_raw[i] for i in range(len(post_observations_raw)) if i % self.agent_time_ratio == self.agent_time_ratio - 1])
-        #
+        post_observations = post_observations_raw[self.agent_time_ratio - 1:][::self.agent_time_ratio]
+
+        # only look at the unique actions we took rather than the repeated actions
+        actions = actions_complete[::self.agent_time_ratio]
+
+        # there is a chance pre_observations is longer than post if we are training on the whole data set because the episode ended
+        if len(pre_observations) > len(post_observations):
+            print("yes")
+            print(pre_observations)
+            print(post_observations)
+            print(actions)
+            pre_observations = pre_observations[:-1]
+            actions = actions[:-1]
+
         # print(pre_observations_raw)
         # print(pre_observations)
         # print(post_observations_raw)
         # print(post_observations)
 
-        # pre_observations = pre_observations_raw
-        # post_observations = post_observations_raw
-
         #### TRAIN THE TRANSITION MODEL ####
-        if self.train_tran:
-            # only look at the first n actions that we took
-            actions = actions_complete[0: len(pre_observations)]
+        if train_tran:
 
             num_observations = pre_observations.shape[0]
             observation_dim = pre_observations.shape[1]
             action_dim = actions.shape[1]
             latent_dim = self.model_vae.latent_dim
-
-            # action_dim = 1  # TODO fix this to allow different actions
 
             # find the actual observed latent states using the vae
             pre_latent_mean, pre_latent_stddev, pre_latent = self.model_vae.encoder(pre_observations)
@@ -112,7 +145,7 @@ class DAIFAgentRecurrent:
             z_train_seq = z_train.reshape((1, num_observations, latent_dim + action_dim))
             z_train_singles = z_train.reshape(num_observations, 1, latent_dim + action_dim)
 
-            # the previous hidden state is the memory after observing some sequences but it might be None
+            # the previous hidden state is the memory after observing some sequences but it might be None if we're just starting
             if self.hidden_state is None:
                 self.hidden_state = np.zeros((1, self.tran.hidden_units))
 
@@ -130,28 +163,41 @@ class DAIFAgentRecurrent:
             h_states_for_training = tf.concat([self.hidden_state, h_states_for_training], axis=0)
 
             # use the hidden states with the pre and post observations to train transition model
-            self.tran.fit((z_train_singles, h_states_for_training), (post_latent_mean, post_latent_stddev), epochs=self.tran_train_epochs, verbose=self.show_tran_training)
+            self.tran.fit((z_train_singles, h_states_for_training), (post_latent_mean, post_latent_stddev), epochs=self.tran_train_epochs, verbose=self.show_tran_training, batch_size=z_train_singles.shape[0])
 
             # now find the new predicted hidden state that we will use for finding the policy
             # TODO not sure if I should pass the old hidden state or reset it to 0
             _, _, final_hidden_state, _ = self.tran((z_train_seq, self.hidden_state))
             # _, _, final_hidden_state, _ = self.tran((z_train_seq, None))
 
+            z_pred, _, _, _ = self.tran((z_train_singles, h_states_for_training))
+
+            # print("LOSS")
+            # print(tf.reduce_mean(self.tran.compute_loss((z_train_singles, h_states_for_training), (post_latent_mean, post_latent_stddev))))
+            #
+            # print("PRED VS REAL")
+            # for i in range(len(z_pred)):
+            #     print(z_pred[i], post_latent_mean[i])
+
             self.hidden_state = final_hidden_state
 
         #### TRAIN THE VAE ####
-        if self.train_vae:
+        if train_vae:
             # train the vae model on post_observations because these are all new
             # self.model_vae.fit(pre_observations_raw, epochs=self.vae_train_epochs, verbose=self.show_vae_training)
-            self.model_vae.fit(pre_observations, epochs=self.vae_train_epochs, verbose=self.show_vae_training)
+            self.model_vae.fit(pre_observations, epochs=self.vae_train_epochs, verbose=self.show_vae_training, batch_size=pre_observations.shape[0])
 
             # print("true", pre_observations)
             # print("pred", self.model_vae(pre_observations))
 
         #### TRAIN THE PRIOR MODEL ####
-        if self.train_prior:
+        if train_prior:
             # self.prior_model.train(post_observations, rewards, verbose=self.show_prior_training)
             self.prior_model.train(post_observations_raw, rewards, verbose=self.show_prior_training)
+
+        #### TRAIN THE HABIT ACTION NET ####
+        if train_habit:
+            self.habit_action_model.fit(pre_observations, actions, epochs=self.habit_train_epochs, verbose=self.show_habit_training, batch_size=pre_observations.shape[0])
 
 
     def select_policy(self, observation):
@@ -168,7 +214,7 @@ class DAIFAgentRecurrent:
         # return a distribution that we can sample from
         return tfp.distributions.MultivariateNormalDiag(loc=policy_mean, scale_diag=policy_stddev)
 
-
+    # TODO Fix this so we can use different action dimensions
     def cem_policy_optimisation(self, z_t_minus_one):
 
         # need to change these two if the policy dimension changes
@@ -183,6 +229,9 @@ class DAIFAgentRecurrent:
             # project trajectory into the future using transition model and calculate FEEF for each policy
             policy_results = self.forward_policies(policies.numpy(), z_t_minus_one)
             FEEFs = self.evaluate_policy(*policy_results)
+
+            # print("POLICIES", policies)
+            # print("FEEFS", FEEFs)
 
             FEEFs = tf.convert_to_tensor(FEEFs)
 
@@ -331,6 +380,9 @@ class DAIFAgentRecurrent:
             else:
                 kl_intrinsic = tf.zeros(self.n_policies, dtype="float")
 
+            # print("Extrinsic", kl_extrinsic)
+            # print("Intrinsic", kl_intrinsic)
+
             FEEF = kl_extrinsic - kl_intrinsic
 
             FEEFs.append(FEEF)
@@ -398,6 +450,9 @@ class DAIFAgentRecurrent:
 
             else:
                 kl_intrinsic = tf.zeros(self.n_policies, dtype="float")
+
+            # print("EX", efe_extrinsic)
+            # print("IN", kl_intrinsic)
 
             EFE = efe_extrinsic - kl_intrinsic
 
