@@ -7,12 +7,24 @@ import numpy as np
 class PriorModelBellman(keras.Model):
 
 
-    def __init__(self, observation_dim, iterate_train=1, discount_factor=0.99):
+    def __init__(self,
+                 observation_dim,
+                 iterate_train=1,
+                 discount_factor=0.99,
+                 training_epochs=1,
+                 show_training=True):
+
         super(PriorModelBellman, self).__init__()
         self.observation_dim = observation_dim
         self.iterate_train = iterate_train
         self.discount_factor = discount_factor
         self.train_epochs = 1
+
+        self.observations = []
+        self.rewards = []
+
+        self.train_epochs = training_epochs
+        self.show_training = show_training
 
         # make the model
         transition_inputs = layers.Input(observation_dim)
@@ -21,9 +33,6 @@ class PriorModelBellman(keras.Model):
 
         self.prior_model = keras.Model(transition_inputs, h, name="prior_model")
         self.prior_model.compile(optimizer=tf.keras.optimizers.SGD(), loss=tf.keras.losses.MeanSquaredError())
-
-        self.observations = []
-        self.rewards = []
 
     def call(self, observations):
         return self.prior_model(observations)

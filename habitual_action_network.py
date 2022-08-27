@@ -7,7 +7,16 @@ import numpy as np
 
 class HabitualAction(keras.Model):
 
-    def __init__(self, latent_dim, action_dim, planning_horizon, dense_units, action_std_dev=0.05, **kwargs):
+    def __init__(self,
+                 latent_dim,
+                 action_dim,
+                 planning_horizon,
+                 dense_units,
+                 action_std_dev=0.05,
+                 train_epochs=1,
+                 show_training=True,
+                 discount_factor=0.99,
+                 **kwargs):
         super(HabitualAction, self).__init__(**kwargs)
 
         habit_action_inputs = layers.Input(latent_dim)
@@ -26,6 +35,12 @@ class HabitualAction(keras.Model):
         self.loss_tracker = keras.metrics.Sum(name="loss")
 
         self.action_std_dev = action_std_dev
+        self.discount_factor = discount_factor
+
+        # train parameters
+        self.train_epochs = train_epochs
+        self.show_training = show_training
+
 
     def call(self, inputs, training=None, mask=None):
         return self.habit_action_model(inputs)
