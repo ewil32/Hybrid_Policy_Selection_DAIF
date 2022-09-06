@@ -49,14 +49,27 @@ def create_decoder(latent_dim, output_dim, hidden_units=[16, 8]):
 
 
 class VAE(keras.Model):
-    def __init__(self, encoder, decoder, latent_dim, reg_mean, reg_stddev, recon_stddev=0.05, llik_scaling=1, kl_scaling=1, **kwargs):
+    def __init__(self,
+                 encoder,
+                 decoder,
+                 latent_dim,
+                 reg_mean,
+                 reg_stddev,
+                 recon_stddev=0.05,
+                 llik_scaling=1,
+                 train_epochs=1,
+                 show_training=True,
+                 **kwargs):
+
         super(VAE, self).__init__(**kwargs)
+
         self.encoder = encoder
         self.decoder = decoder
         self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
         self.reconstruction_loss_tracker = keras.metrics.Mean(
             name="reconstruction_loss"
         )
+
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
 
         self.latent_dim = latent_dim
@@ -67,7 +80,12 @@ class VAE(keras.Model):
         self.reconstruction_stddev = recon_stddev
 
         self.llik_scaling = llik_scaling
-        self.kl_scaling = kl_scaling
+
+        self.train_epochs = train_epochs
+        self.show_training = show_training
+
+
+
 
     @property
     def metrics(self):
@@ -90,7 +108,7 @@ class VAE(keras.Model):
 
         posterior_dist = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_stddev)
         reg_dist = tfp.distributions.MultivariateNormalDiag(loc=self.reg_mean, scale_diag=self.reg_stddev)
-        kl_loss = tfp.distributions.kl_divergence(posterior_dist, reg_dist) * self.kl_scaling
+        kl_loss = tfp.distributions.kl_divergence(posterior_dist, reg_dist)
 
         # kl_loss = tf.reduce_sum(kl_loss, axis=1)
         total_loss = reconstruction_loss + kl_loss
@@ -107,22 +125,15 @@ class VAE(keras.Model):
             z_mean, z_stddev, z = self.encoder(x)
             reconstruction = self.decoder(z)
 
-            # TODO why is it not this? Why should it be log prob instead?
-            # reconstruction_loss = keras.losses.binary_crossentropy(x, reconstruction) * self.llik_scaling  # need scaling to stop collapse
-
-            # TODO fix this because it seems totally wrong
-            # prob dist of reconstruction and log prob of obs under this distribution
-            # reconstruction_dist = tfp.distributions.MultivariateNormalDiag(loc=reconstruction, scale_diag=tf.ones_like(reconstruction) * self.reconstruction_stddev)
-            # reconstruction_loss = -1 * reconstruction_dist.log_prob(x)
-
             reconstruction_loss = nll_gaussian(reconstruction, x, self.reconstruction_stddev**2, use_consts=False) * self.llik_scaling
 
             posterior_dist = tfp.distributions.MultivariateNormalDiag(loc=z_mean, scale_diag=z_stddev)
             reg_dist = tfp.distributions.MultivariateNormalDiag(loc=self.reg_mean, scale_diag=self.reg_stddev)
-            kl_loss = tfp.distributions.kl_divergence(posterior_dist, reg_dist) * self.kl_scaling
+            kl_loss = tfp.distributions.kl_divergence(posterior_dist, reg_dist)
 
             # kl_loss = tf.reduce_sum(kl_loss, axis=1)
             total_loss = reconstruction_loss + kl_loss
+
         grads = tape.gradient(total_loss, self.trainable_weights)
         self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
         self.total_loss_tracker.update_state(total_loss)

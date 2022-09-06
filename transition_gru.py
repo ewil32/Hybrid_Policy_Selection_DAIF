@@ -10,21 +10,18 @@ class TransitionGRU(keras.Model):
     def __init__(self,
                  latent_dim,
                  action_dim,
-                 seq_length,
                  hidden_units,
                  output_dim,
-                 batch_size=None,
+                 train_epochs=1,
+                 show_training=True,
                  **kwargs):
 
         super(TransitionGRU, self).__init__(**kwargs)
 
         self.latent_dim = latent_dim
         self.action_dim = action_dim
-        self.seq_length = seq_length
         self.hidden_units = hidden_units
         self.output_dim = output_dim
-
-        self.batch_size = batch_size  # this should be number of policies I think
 
         # build the network
         inputs = layers.Input(shape=(None, self.latent_dim + self.action_dim))
@@ -39,6 +36,12 @@ class TransitionGRU(keras.Model):
         self.transition_model = keras.Model([inputs, initial_state_input], [z_mean, z_stddev, final_state, h_states], name="transition")
 
         self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
+
+        # important attributes
+        self.train_epochs = train_epochs
+        self.show_training = show_training
+
+        self.hidden_state = None
 
 
     def call(self, inputs, training=None, mask=None):
