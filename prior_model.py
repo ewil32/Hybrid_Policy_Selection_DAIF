@@ -40,7 +40,7 @@ class PriorModelBellman(keras.Model):
     def extrinsic_kl(self, observations):
         return 1.0 - self(observations)  # map from [-1, 1] to [2, 0]
 
-    def train(self, observations, rewards, verbose):
+    def train(self, observations, rewards):
         """
 
         :param observations: o_0, o_1, ... , o_n
@@ -72,4 +72,4 @@ class PriorModelBellman(keras.Model):
             # print(rewards_stacked)
             # print(discount_factors * utility_t_plus_one)
 
-            self.prior_model.fit(observations, expected_utility, epochs=self.train_epochs, verbose=verbose)
+            self.prior_model.fit(observations, expected_utility, epochs=self.train_epochs, verbose=self.show_training)

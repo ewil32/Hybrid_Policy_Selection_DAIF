@@ -10,13 +10,13 @@ class HabitualAction(keras.Model):
     def __init__(self,
                  latent_dim,
                  action_dim,
-                 planning_horizon,
                  dense_units,
                  action_std_dev=0.05,
                  train_epochs=1,
                  show_training=True,
                  discount_factor=0.99,
                  **kwargs):
+
         super(HabitualAction, self).__init__(**kwargs)
 
         habit_action_inputs = layers.Input(latent_dim)
@@ -56,17 +56,17 @@ class HabitualAction(keras.Model):
         # on what you pass to `fit()`.
 
         latent_states, outcomes = data
-        true_actions, cum_discounted_rewards = outcomes
+        true_actions, cum_discounted_reward = outcomes
 
         # TODO what do I assume the
         with tf.GradientTape() as tape:
             # a_mean, a_stddev = self.habit_action_model(latent_states, training=True)  # Forward pass
             a_mean = self.habit_action_model(latent_states, training=True)  # Forward pass
 
-            print(a_mean, true_actions)
+            # print(a_mean, true_actions)
 
             log_loss = log_likelihood_gaussian(a_mean, true_actions, self.action_std_dev**2, use_consts=False)
-            weighted_log_loss = log_loss * cum_discounted_rewards
+            weighted_log_loss = log_loss * cum_discounted_reward
 
             # need to multiply by negative one because neural net does gradient descent not ascent
             neg_weighted_log_loss = -1 * weighted_log_loss
