@@ -1,6 +1,6 @@
 import numpy as np
 
-def random_observation_sequence(env, length, epsilon=0.5):
+def random_observation_sequence(env, length, epsilon=0.5, render_env=False):
 
     observation = env.reset()
 
@@ -15,6 +15,9 @@ def random_observation_sequence(env, length, epsilon=0.5):
         # change action with epsilon change action, else repeat the same action
         if np.random.uniform(0, 1) < epsilon:
             action = env.action_space.sample()
+
+        if render_env:
+            env.render()
 
         observation, reward, done, *rest = env.step(action)
 

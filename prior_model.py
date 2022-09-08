@@ -30,6 +30,7 @@ class PriorModelBellman(keras.Model):
         transition_inputs = layers.Input(observation_dim)
         h = layers.Dense(observation_dim * 20, activation="silu")(transition_inputs)
         h = layers.Dense(observation_dim, activation="tanh")(h)
+        # h = layers.Dense(observation_dim)(h)
 
         self.prior_model = keras.Model(transition_inputs, h, name="prior_model")
         self.prior_model.compile(optimizer=tf.keras.optimizers.SGD(), loss=tf.keras.losses.MeanSquaredError())
