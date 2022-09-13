@@ -59,3 +59,13 @@ def transform_observations(observations, observation_max, observation_min, noise
     observations_clipped = np.clip(observation_noisy, -1, 1)
 
     return observations_clipped
+
+
+def transform_image(img, x_min, x_max, y_min, y_max):
+    img_out = img/255
+
+    img_out = img_out[x_min:x_max, y_min:y_max, :]
+
+    return img_out
+
+

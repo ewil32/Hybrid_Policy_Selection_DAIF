@@ -6,13 +6,13 @@ import numpy as np
 
 class PriorModelBellman(keras.Model):
 
-
     def __init__(self,
                  observation_dim,
                  iterate_train=1,
                  discount_factor=0.99,
                  training_epochs=1,
-                 show_training=True):
+                 show_training=True,
+                 use_tanh_on_output=True):
 
         super(PriorModelBellman, self).__init__()
         self.observation_dim = observation_dim
@@ -29,8 +29,10 @@ class PriorModelBellman(keras.Model):
         # make the model
         transition_inputs = layers.Input(observation_dim)
         h = layers.Dense(observation_dim * 20, activation="silu")(transition_inputs)
-        h = layers.Dense(observation_dim, activation="tanh")(h)
-        # h = layers.Dense(observation_dim)(h)
+        if use_tanh_on_output:
+            h = layers.Dense(observation_dim, activation="tanh")(h)
+        else:
+            h = layers.Dense(observation_dim)(h)
 
         self.prior_model = keras.Model(transition_inputs, h, name="prior_model")
         self.prior_model.compile(optimizer=tf.keras.optimizers.SGD(), loss=tf.keras.losses.MeanSquaredError())

@@ -69,7 +69,8 @@ def create_conv_decoder(latent_dim, output_shape, deconv_shapes=[3, 3, 3], num_f
 
 
 class ConvVAE(keras.Model):
-    def __init__(self, encoder, decoder, latent_dim, reg_mean, reg_stddev, recon_stddev=0.05, llik_scaling=1, kl_scaling=1, **kwargs):
+    def __init__(self, encoder, decoder, latent_dim, reg_mean, reg_stddev, recon_stddev=0.05, llik_scaling=1, kl_scaling=1, train_epochs=1, show_training=False, **kwargs):
+
         super(ConvVAE, self).__init__(**kwargs)
         self.encoder = encoder
         self.decoder = decoder
@@ -88,6 +89,9 @@ class ConvVAE(keras.Model):
 
         self.llik_scaling = llik_scaling
         self.kl_scaling = kl_scaling
+
+        self.train_epochs = train_epochs
+        self.show_training = show_training
 
     @property
     def metrics(self):

@@ -46,6 +46,15 @@ class HabitualAction(keras.Model):
         return self.habit_action_model(inputs)
 
 
+    def train(self, pre_obs, actions, cum_rewards, post_obs):
+
+        self.fit(pre_obs,
+                 (actions, cum_rewards),
+                 epochs=self.train_epochs,
+                 verbose=self.show_training,
+                 batch_size=pre_obs.shape[0])
+
+
     @property
     def metrics(self):
         return [self.loss_tracker]
