@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 
 def random_observation_sequence(env, length, epsilon=0.5, render_env=False):
 
@@ -29,25 +30,17 @@ def random_observation_sequence(env, length, epsilon=0.5, render_env=False):
         if done:
             break
 
-
     return np.array(observations), np.array(actions), np.array(rewards)
 
 
 def transform_observations(observations, observation_max, observation_min, noise_stddev):
     """
+    https://www.gymlibrary.ml/environments/classic_control/mountain_car_continuous/
+
     Transform mountain car observations to be in the range 0 to 1
     :param observations:
     :return:
     """
-
-    # https://www.gymlibrary.ml/environments/classic_control/mountain_car_continuous/
-    # the standard max and min values
-    # observation_max = np.array([0.6, 0.07])
-    # observation_min = np.array([-1.2, -0.07])
-
-    # Need to increase the max and min to allow for random noise to be added
-    # observation_max = np.array([1.2, 0.14])
-    # observation_min = np.array([-2.4, -0.14])
 
     observations_scaled = (observations - observation_min)/(observation_max - observation_min)
 
@@ -67,5 +60,63 @@ def transform_image(img, x_min, x_max, y_min, y_max):
     img_out = img_out[x_min:x_max, y_min:y_max, :]
 
     return img_out
+
+
+def test_policy(env, policy_func, observation_max, observation_min, obs_stddev, num_episodes, num_action_repeats, show_env=False):
+
+    all_rewards = []
+    all_times = []
+    all_num_actions = []
+
+    rows = []
+
+    for i in range(num_episodes):
+
+        obs = env.reset()
+
+        if show_env:
+            env.render()
+
+        done = False
+        rewards = []
+        t = 0
+
+        while not done:
+
+            obs = obs.reshape(1, obs.shape[0])
+            obs = transform_observations(obs, observation_max, observation_min, obs_stddev)
+
+            action = policy_func(obs)
+            action = action.numpy()
+
+            for k in range(num_action_repeats):
+                obs, reward, done, info = env.step(action)
+
+                t += 1
+
+                if show_env:
+                    env.render()
+
+            rewards.append(reward)
+
+        rows.append([np.sum(rewards), t, t//num_action_repeats])
+        # all_rewards.append(np.sum(rewards))
+        # all_times.append(t)
+        # all_num_actions.append(t//num_action_repeats)
+
+    env.close()
+
+    results = pd.DataFrame(rows, columns=["reward", "timesteps", "num_actions"])
+
+    return results
+
+
+def habit_policy(agent):
+
+    def f(obs):
+        action = agent.select_fast_thinking_policy(obs)
+        return action
+
+    return f
 
 

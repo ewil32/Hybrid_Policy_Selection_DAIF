@@ -50,7 +50,8 @@ class BasicDDPG:
         self.critic_optimizer = critic_optimizer
         self.actor_optimizer = actor_optimizer
 
-    # def call(self):
+    def select_action(self, state):
+        return self.actor_model(state)
 
     def update_actor_target(self):
         update_target(self.target_actor.variables, self.actor_model.variables, self.tau)

@@ -42,6 +42,10 @@ class HabitualAction(keras.Model):
         self.show_training = show_training
 
 
+    def select_action(self, state):
+        return self.habit_action_model(state)
+
+
     def call(self, inputs, training=None, mask=None):
         return self.habit_action_model(inputs)
 

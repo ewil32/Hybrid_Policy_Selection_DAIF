@@ -12,10 +12,11 @@ def train_single_agent(mcc_env,
                        obs_min,
                        observation_noise_stddev,
                        num_episodes=100,
-                       render_env=False):
+                       render_env=False,
+                       flip_dynamics=False):
 
     # Set up to store results in pandas frame
-    cols = ["episode", "success", "sim_steps", "VFE_post_run", "noise_stddev"]
+    cols = ["episode", "success", "sim_steps", "VFE_post_run", "noise_stddev", "percent_use_fast_thinking", "total_reward", "agent_time_ratio"]
     rows = []
 
     for n in range(num_episodes):
@@ -42,9 +43,10 @@ def train_single_agent(mcc_env,
                 mcc_env.render()
 
             action = agent.perceive_and_act(observation_noisy, reward=reward, done=done)
-            # print(action)
+            if flip_dynamics:
+                action = np.array(action) * -1
+
             observation, reward, done, info = mcc_env.step(action)  # action should be array to satisfy gym requirements
-            # print(observation)
             observation_noisy = transform_observations(observation, obs_max, obs_min, observation_noise_stddev)
             observation_noisy = observation_noisy.reshape(1, observation_noisy.shape[0])
 
@@ -56,10 +58,11 @@ def train_single_agent(mcc_env,
         success = t < 999
 
         # get the VFE of the model for the run
-        # VFE = float(tf.reduce_mean(agent.model_vae.compute_loss(all_post_observations)))
-        VFE = 0
+        VFE = float(tf.reduce_mean(agent.model_vae.compute_loss(np.vstack(agent.full_observation_sequence))))
+        percent_use_fast_thinking = agent.num_fast_thinking_choices / len(agent.full_action_sequence)
+        total_reward = np.sum(agent.full_reward_sequence)
 
-        rows.append(dict(zip(cols, [n, success, t, VFE, observation_noise_stddev])))
+        rows.append(dict(zip(cols, [n, success, t, VFE, observation_noise_stddev, percent_use_fast_thinking, total_reward, agent.agent_time_ratio])))
 
         if success:
             print("Success in episode", n+1, "at time step", t)
@@ -119,9 +122,6 @@ def train_single_agent_car_racing(cr_env,
                 brake = -1*brake_or_gas
                 action_to_execute = np.array([turn_direction, 0, brake])
 
-            # print(action_to_execute)
-
-            # print(action)
             observation, reward, done, info, *rest = cr_env.step(action_to_execute)  # action should be array to satisfy gym requirements
             # print(observation.shape)
             scaled_observation = transform_image(observation, 16, 80, 16, 80)
@@ -155,10 +155,3 @@ def train_single_agent_car_racing(cr_env,
     cr_env.close()
 
     return agent, results
-
-
-
-
-
-
-

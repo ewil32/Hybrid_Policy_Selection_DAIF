@@ -2,7 +2,6 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 import numpy as np
 
-# from vae_recurrent import VAE
 
 
 class DAIFAgentRecurrent:
@@ -30,6 +29,7 @@ class DAIFAgentRecurrent:
                  use_kl_intrinsic=True,
                  use_FEEF=True,
                  use_fast_thinking=False,
+                 uncertainty_tolerance=0.05,
                  habit_model_type="name_of_model"):
 
         super(DAIFAgentRecurrent, self).__init__()
@@ -73,6 +73,8 @@ class DAIFAgentRecurrent:
 
         # track the hidden state of the transition gru model so we can use it to train
         self.tran_hidden_state = None
+        self.tran_hidden_state_pre_exploring = None
+        self.prev_tran_hidden_state = None
 
         # store the full observations for the episode so we can train using replay
         self.full_observation_sequence = []
@@ -90,9 +92,12 @@ class DAIFAgentRecurrent:
         self.policy_left_to_execute = [None]
         self.previous_observation = None
         self.action_being_executed = None
+        self.action_being_executed = 0
 
         self.use_fast_thinking = use_fast_thinking
         self.habit_model_type = habit_model_type
+        self.uncertainty_tolerance = uncertainty_tolerance
+        self.num_fast_thinking_choices = 0
 
 
     def perceive_and_act(self, observation, reward, done):
@@ -112,30 +117,31 @@ class DAIFAgentRecurrent:
         self.env_time_scale_observations.append(observation)
 
         # if the episode is finished, then do any training on the full data set
-        if done:
+        if done and self.train_with_replay:
 
-            if self.train_with_replay:
-                print("training on full data")
+            print("training on full data")
+            print(self.num_fast_thinking_choices, len(self.full_action_sequence))
 
-                # add the final observation and reward we observed to the sequences
-                self.full_observation_sequence.append(observation)
-                self.full_reward_sequence.append(reward)
+            # add the final observation and reward we observed to the sequences
+            self.full_observation_sequence.append(observation)
+            self.full_reward_sequence.append(reward)
 
-                # Call the training function on the observation sequences to train everything we need to train
-                self.train_models(np.vstack(self.full_observation_sequence),
-                                  np.vstack(self.full_action_sequence),
-                                  np.array(self.full_reward_sequence))
+            # Call the training function on the observation sequences to train everything we need to train
+            self.train_models(np.vstack(self.full_observation_sequence),
+                              np.vstack(self.full_action_sequence),
+                              np.array(self.full_reward_sequence),
+                              None)
 
 
         # Otherwise are we at a point where we can reconsider our policy and maybe train the world model
         elif self.time_step % self.agent_time_ratio == 0:
 
+            # add the observation to the sequence
+            self.full_observation_sequence.append(observation)
+
             # add the reward only if it's not the first observation
             if self.time_step != 0:
                 self.full_reward_sequence.append(reward)
-
-            # add the observation to the sequence
-            self.full_observation_sequence.append(observation)
 
             # We only update the model during the episode when we were exploring using the planning method and we have executed all of the actions in the policy
             if self.exploring and len(self.policy_left_to_execute) == 0:
@@ -144,6 +150,7 @@ class DAIFAgentRecurrent:
                 # print("e", self.full_observation_sequence[-1*(self.actions_to_execute_when_exploring + 1):])
 
                 if self.train_after_exploring:
+
                     # the actions done while exploring were the last self.actions_to_execute_when_exploring
                     self.exploring_action_sequence = self.full_action_sequence[-1*self.actions_to_execute_when_exploring:]
                     self.exploring_reward_sequence = self.full_reward_sequence[-1*self.actions_to_execute_when_exploring:]
@@ -152,53 +159,58 @@ class DAIFAgentRecurrent:
                     # Call the training function on the observation sequences to train everything we need to train
                     self.train_models(np.vstack(self.exploring_observation_sequence),
                                       np.vstack(self.exploring_action_sequence),
-                                      np.array(self.exploring_reward_sequence))
+                                      np.array(self.exploring_reward_sequence),
+                                      self.tran_hidden_state_pre_exploring)
 
+                # now we're no longer exploring
                 self.exploring = False
 
+
+            # Predict the expected observation based on the previously executed action
+            action_as_array = np.array(self.action_being_executed).reshape(1, self.tran.action_dim)
+            expected_observation, self.tran_hidden_state = self.predict_next_observation(self.previous_observation, action_as_array, self.prev_tran_hidden_state)
 
             # Now we select our action. If we aren't exploring then either we act out of habit or we might need to explore
             # I think I can check this based on whether or not there are actions left to execute in the current policy
             if not self.exploring:
 
-                # TODO get all this stuff to work with the habit action
-                # action_as_array = np.array(self.action_being_executed).reshape(1, self.tran.action_dim)
-                # pred_next_observation, next_tran_hidden_state = self.predict_next_observation(self.previous_observation, action_as_array)
-                pred_next_observation, next_tran_hidden_state = None, None
-
-                # if self.previous_observation is None:
-                #     # self.policy_left_to_execute = self.habit_action_model(observation)
-                #     self.policy_left_to_execute = self.habit_action_model.actor_model(observation)
-                #     self.policy_left_to_execute = self.policy_left_to_execute.numpy().tolist()  # tf tensor to list
+                # first observation will have no previous observation
+                if self.use_fast_thinking and self.previous_observation is None:
+                    # self.policy_left_to_execute = self.habit_action_model(observation)
+                    self.policy_left_to_execute = self.select_fast_thinking_policy(observation)
+                    self.policy_left_to_execute = self.policy_left_to_execute.numpy().tolist()  # tf tensor to list
+                    print("fast thinking")
 
                 # TDOD Fix this to work however it needs to
                 # we need to see what the generative model now thinks about what the expected current observation is
-                if self.use_fast_thinking and np.allclose(observation, pred_next_observation, atol=self.model_vae.reconstruction_stddev):  # within some tolerance
-                    # self.policy_left_to_execute = self.habit_action_model(observation)
-                    self.policy_left_to_execute = self.habit_action_model.actor_model(observation)
+                elif self.use_fast_thinking and np.allclose(observation, expected_observation, atol=self.uncertainty_tolerance):  # within some tolerance
+
+                    self.policy_left_to_execute = self.select_fast_thinking_policy(observation)
                     # self.policy_left_to_execute = self.policy_left_to_execute + np.random.normal(0, scale=self.habit_action_model.action_std_dev)
                     self.policy_left_to_execute = self.policy_left_to_execute.numpy().tolist()
 
-                    self.tran_hidden_state = next_tran_hidden_state
-
+                    # self.tran_hidden_state = next_tran_hidden_state
+                    self.num_fast_thinking_choices += 1
                     print("fast thinking")
 
                 # the generative model is surprised so we should use the slow deliberation for planning out a policy that balances exploration and exploitation
                 else:
+                    # TODO should we actually sample here?
                     # print("slow thinking")
                     policy = self.select_policy(observation)
-                    # print(policy.mean())
                     policy = policy.mean().numpy()
                     policy = policy.reshape(policy.shape[0], self.tran.action_dim).tolist()
                     self.policy_left_to_execute = policy[0: self.actions_to_execute_when_exploring]
 
+                    self.tran_hidden_state_pre_exploring = self.tran_hidden_state
+
                     self.exploring = True
 
-                # print(observation)
-                # print(pred_next_observation)
+
 
             # finally update the previous observation and action to be the one we just had/did
             self.previous_observation = observation
+            self.prev_tran_hidden_state = self.tran_hidden_state
             self.action_being_executed = self.policy_left_to_execute[0]
             self.full_action_sequence.append(self.action_being_executed)
             self.policy_left_to_execute.pop(0)
@@ -209,13 +221,12 @@ class DAIFAgentRecurrent:
         return self.action_being_executed
 
 
-    def predict_next_observation(self, obs, action):
+    def predict_next_observation(self, obs, action, tran_hidden_state):
 
         # TODO: Fix this with the transition hidden states
         if obs is None:
             return None, None
         else:
-            # print(obs.shape)
             z_mean, z_std, z = self.model_vae.encoder(obs)
             # print(z_mean.shape)
             # print(action.shape)
@@ -228,7 +239,7 @@ class DAIFAgentRecurrent:
             z_plus_action = z_plus_action.reshape(1, 1, z_plus_action.shape[1])
             # print(z_plus_action)
 
-            next_latent_mean, next_latent_sd, next_hidden_state, _ = self.tran((z_plus_action, self.tran_hidden_state))
+            next_latent_mean, next_latent_sd, next_hidden_state, _ = self.tran((z_plus_action, tran_hidden_state))
 
             next_observation = self.model_vae.decoder(next_latent_mean)
             # print(next_observation)
@@ -262,8 +273,10 @@ class DAIFAgentRecurrent:
         self.previous_observation = None
         self.previous_action_executed = None
 
+        self.num_fast_thinking_choices = 0
 
-    def train_models(self, observations_full, actions, rewards):
+
+    def train_models(self, observations_full, actions, rewards, tran_hidden_state_pre_obs):
 
         pre_observations = observations_full[:-1]
         post_observations = observations_full[1:]
@@ -288,11 +301,11 @@ class DAIFAgentRecurrent:
             z_train_singles = z_train.reshape(num_observations, 1, latent_dim + action_dim)
 
             # the previous hidden state is the memory after observing some sequences but it might be None if we're just starting
-            if self.tran_hidden_state is None:
-                self.tran_hidden_state = np.zeros((1, self.tran.hidden_units))
+            if tran_hidden_state_pre_obs is None:
+                tran_hidden_state_pre_obs = np.zeros((1, self.tran.hidden_units))
 
             # find the hidden states at t=0, t=1, t=2, ..., t=num_observations - 1
-            _, _, _, h_states = self.tran((z_train_seq, self.tran_hidden_state))
+            _, _, _, h_states = self.tran((z_train_seq, tran_hidden_state_pre_obs))
 
             # squeeze so we make the shape [num_observations, hidden_units]
             h_states = tf.squeeze(h_states)
@@ -302,18 +315,21 @@ class DAIFAgentRecurrent:
             # next_hidden_state = h_states[-1]
 
             # add the current hidden state we saved to the start. This has h0, h1, h2, .. h=num_observations - 1
-            h_states_for_training = tf.concat([self.tran_hidden_state, h_states_for_training], axis=0)
+            h_states_for_training = tf.concat([tran_hidden_state_pre_obs, h_states_for_training], axis=0)
 
             # use the hidden states with the pre and post observations to train transition model
             self.tran.fit((z_train_singles, h_states_for_training), (post_latent_mean, post_latent_stddev), epochs=self.tran.train_epochs, verbose=self.tran.show_training, batch_size=z_train_singles.shape[0])
 
             # now find the new predicted hidden state that we will use for finding the policy
             # TODO not sure if I should pass the old hidden state or reset it to 0
-            _, _, final_hidden_state, _ = self.tran((z_train_seq, self.tran_hidden_state))
+            _, _, final_hidden_state, h_states = self.tran((z_train_seq, tran_hidden_state_pre_obs))
             # _, _, final_hidden_state, _ = self.tran((z_train_seq, None))
 
             z_pred, _, _, _ = self.tran((z_train_singles, h_states_for_training))
-
+            # print(h_states)
+            # print(final_hidden_state)
+            # print(h_states[:, -2, :])
+            self.prev_tran_hidden_state = h_states[:, -2, :]
             self.tran_hidden_state = final_hidden_state
 
 
@@ -331,6 +347,7 @@ class DAIFAgentRecurrent:
             if max(rewards) > 0:
                 # self.prior_model.train(post_observations, rewards)
                 self.prior_model.train(post_latent_mean, rewards)
+
 
         #### TRAIN THE HABIT ACTION NET ####
         if self.train_habit_net:
@@ -363,20 +380,34 @@ class DAIFAgentRecurrent:
             # cum_rewards = compute_discounted_cumulative_reward(obs_utilities, self.habit_action_model.discount_factor)
 
             if self.habit_model_type == "PG":
-                rewards = rewards.reshape(rewards.shape[0], 1)
-                cum_rewards = compute_discounted_cumulative_reward(rewards, self.habit_action_model.discount_factor)
-                rewards_to_train_on = cum_rewards
+                # rewards = rewards.reshape(rewards.shape[0], 1)
+                # cum_rewards = compute_discounted_cumulative_reward(rewards, self.habit_action_model.discount_factor)
+                # rewards_to_train_on = cum_rewards
 
-                # print(cum_rewards)
-                # print(cum_rewards.sum())
+                # TODO I think for the final state the V(s_t+1) should be set to 0
+                # ADVANTAGE
+                v_state = self.prior_model(pre_latent_mean)
+                v_plus_one_state = self.prior_model(post_latent_mean)
+                advantage = rewards + self.prior_model.discount_factor * v_plus_one_state - v_state
 
-                # rewards_to_train_on = rewards
+                # print(advantage)
 
                 # DDPG and policy gradient interface with same function
-                self.habit_action_model.train(pre_latent_mean, actions, rewards_to_train_on, post_latent_mean)
+                # self.habit_action_model.train(pre_latent_mean, actions, rewards_to_train_on, post_latent_mean)
+                self.habit_action_model.train(pre_latent_mean, actions, advantage, post_latent_mean)
 
             if self.habit_model_type == "DDPG":
                 self.habit_action_model.train(pre_latent_mean, actions, rewards, post_latent_mean)
+
+
+    def select_fast_thinking_policy(self, observation):
+
+        # TODO should you select the mean here?
+        # _,  _, latent_state = self.model_vae.encoder(observation)
+        latent_state,  _, _ = self.model_vae.encoder(observation)
+        action = self.habit_action_model.select_action(latent_state)
+
+        return action
 
 
     def select_policy(self, observation):
@@ -387,7 +418,9 @@ class DAIFAgentRecurrent:
 
         # TODO do you take the mean or that latent here?
         # get the latent state from this observation
+        # TODO should I use the mean here?
         _,  _, latent_state = self.model_vae.encoder(observation)
+        # latent_state,  _, _ = self.model_vae.encoder(observation)
         # latent_state = latent_state.numpy().reshape((1, latent_state.shape[0]))
         # print(latent_state)
         # print(latent_state)
@@ -641,8 +674,10 @@ class DAIFAgentRecurrent:
             else:
                 kl_intrinsic = tf.zeros(self.n_policies, dtype="float")
 
-            # print("EX", efe_extrinsic)
-            # print("IN", kl_intrinsic)
+            # print("EX")
+            # print(efe_extrinsic)
+            # print("IN")
+            # print(kl_intrinsic)
 
             EFE = efe_extrinsic - kl_intrinsic
 
