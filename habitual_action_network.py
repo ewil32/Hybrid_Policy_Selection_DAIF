@@ -42,8 +42,21 @@ class HabitualAction(keras.Model):
         self.show_training = show_training
 
 
+    def select_action(self, state):
+        return self.habit_action_model(state)
+
+
     def call(self, inputs, training=None, mask=None):
         return self.habit_action_model(inputs)
+
+
+    def train(self, pre_obs, actions, cum_rewards, post_obs):
+
+        self.fit(pre_obs,
+                 (actions, cum_rewards),
+                 epochs=self.train_epochs,
+                 verbose=self.show_training,
+                 batch_size=pre_obs.shape[0])
 
 
     @property
