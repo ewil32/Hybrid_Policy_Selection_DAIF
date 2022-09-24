@@ -30,7 +30,8 @@ class DAIFAgentRecurrent:
                  use_FEEF=True,
                  use_fast_thinking=False,
                  uncertainty_tolerance=0.05,
-                 habit_model_type="name_of_model"):
+                 habit_model_type="name_of_model",
+                 min_rewards_needed_to_train_prior=0):
 
         super(DAIFAgentRecurrent, self).__init__()
 
@@ -98,6 +99,9 @@ class DAIFAgentRecurrent:
         self.habit_model_type = habit_model_type
         self.uncertainty_tolerance = uncertainty_tolerance
         self.num_fast_thinking_choices = 0
+
+        # Normally 0 but this is just a bad parameter and I don't know if it should exist
+        self.min_rewards_needed_to_train_prior = min_rewards_needed_to_train_prior
 
 
     def perceive_and_act(self, observation, reward, done):
@@ -344,7 +348,7 @@ class DAIFAgentRecurrent:
         # TODO fix how this part should work
         if self.train_prior:
             # self.prior_model.train(post_observations, rewards, verbose=self.show_prior_training)
-            if max(rewards) > 0:
+            if max(rewards) > self.min_rewards_needed_to_train_prior:
                 # self.prior_model.train(post_observations, rewards)
                 self.prior_model.train(post_latent_mean, rewards)
 

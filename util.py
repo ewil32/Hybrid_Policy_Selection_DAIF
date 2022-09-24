@@ -91,8 +91,8 @@ def test_policy(env, policy_func, observation_max, observation_min, obs_stddev, 
             obs = transform_observations(obs, observation_max, observation_min, obs_stddev)
 
             action = policy_func(obs)
-            action = action.numpy().squeeze()
-            print(action)
+            action = action.numpy()
+            # print(action)
 
             for k in range(num_action_repeats):
                 obs, reward, done, info = env.step(action)
