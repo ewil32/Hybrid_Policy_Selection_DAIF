@@ -9,6 +9,7 @@ class PriorModelBellman(keras.Model):
     def __init__(self,
                  observation_dim,
                  output_dim=1,
+                 hidden_units=[20],
                  iterate_train=1,
                  discount_factor=0.99,
                  training_epochs=1,
@@ -31,7 +32,10 @@ class PriorModelBellman(keras.Model):
 
         # make the model
         transition_inputs = layers.Input(observation_dim)
-        h = layers.Dense(observation_dim * 20, activation="silu")(transition_inputs)
+        h = transition_inputs
+        for n in hidden_units:
+            h = layers.Dense(observation_dim * n, activation="silu")(h)
+
         if use_tanh_on_output:
             h = layers.Dense(output_dim, activation="tanh")(h)
         else:

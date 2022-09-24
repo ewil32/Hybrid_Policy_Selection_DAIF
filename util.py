@@ -33,7 +33,7 @@ def random_observation_sequence(env, length, epsilon=0.5, render_env=False):
     return np.array(observations), np.array(actions), np.array(rewards)
 
 
-def transform_observations(observations, observation_max, observation_min, noise_stddev):
+def transform_observations(observations, observation_max=None, observation_min=None, noise_stddev=None):
     """
     https://www.gymlibrary.ml/environments/classic_control/mountain_car_continuous/
 
@@ -42,14 +42,18 @@ def transform_observations(observations, observation_max, observation_min, noise
     :return:
     """
 
-    observations_scaled = (observations - observation_min)/(observation_max - observation_min)
-
-    observations_scaled = 2*observations_scaled - 1
+    if observation_max is not None and observation_min is not None:
+        observations_scaled = (observations - observation_min)/(observation_max - observation_min)
+        observations_scaled = 2*observations_scaled - 1
+    else:
+        observations_scaled = observations
 
     # add noise
-    observation_noisy = observations_scaled + np.random.normal(loc=0, scale=noise_stddev, size=observations_scaled.shape)
-
-    observations_clipped = np.clip(observation_noisy, -1, 1)
+    if noise_stddev is not None:
+        observation_noisy = observations_scaled + np.random.normal(loc=0, scale=noise_stddev, size=observations_scaled.shape)
+        observations_clipped = np.clip(observation_noisy, -1, 1)
+    else:
+        observations_clipped = observations_scaled
 
     return observations_clipped
 
@@ -87,7 +91,8 @@ def test_policy(env, policy_func, observation_max, observation_min, obs_stddev, 
             obs = transform_observations(obs, observation_max, observation_min, obs_stddev)
 
             action = policy_func(obs)
-            action = action.numpy()
+            action = action.numpy().squeeze()
+            print(action)
 
             for k in range(num_action_repeats):
                 obs, reward, done, info = env.step(action)

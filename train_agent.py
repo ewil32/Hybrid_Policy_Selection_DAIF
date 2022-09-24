@@ -65,7 +65,7 @@ def train_single_agent(mcc_env,
         rows.append(dict(zip(cols, [n, success, t, VFE, observation_noise_stddev, percent_use_fast_thinking, total_reward, agent.agent_time_ratio])))
 
         if success:
-            print("Success in episode", n+1, "at time step", t)
+            print(f"Success in episode {n+1} at time step {t} with reward {total_reward}")
         else:
             print("No Success")
 
