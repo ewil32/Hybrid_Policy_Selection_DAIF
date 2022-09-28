@@ -288,11 +288,11 @@ class DAIFAgent:
 
 
         #### TRAIN THE PRIOR MODEL ####
-        # TODO fix how this part should work
         if self.train_prior:
             # self.prior_model.train(post_observations, rewards, verbose=self.show_prior_training)
             if max(rewards) > self.min_rewards_needed_to_train_prior:
                 # self.prior_model.train(post_observations, rewards)
+                # TODO should this be post or pre mean
                 self.prior_model.train(post_latent_mean, rewards)
 
 
