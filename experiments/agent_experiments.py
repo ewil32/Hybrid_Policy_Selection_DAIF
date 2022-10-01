@@ -94,7 +94,7 @@ def habit_action_A2C_experiment(
         # Switch on HABIT if it wasn't already on
         daifa.habit_action_model.show_training = False
         daifa.train_habit_net = True
-        daifa.train_after_exploring = True
+        daifa.train_during_episode = True
         daifa.use_fast_thinking = True
         daifa.uncertainty_tolerance = agent_params["uncertainty_tolerance"]
 
@@ -238,7 +238,7 @@ def habit_action_DDPG_experiment(
         # Switch on HABIT if it wasn't already on
         daifa.habit_action_model.show_training = False
         daifa.train_habit_net = True
-        daifa.train_after_exploring = True
+        daifa.train_during_episode = True
         daifa.use_fast_thinking = True
         daifa.uncertainty_tolerance = agent_params["uncertainty_tolerance"]
 

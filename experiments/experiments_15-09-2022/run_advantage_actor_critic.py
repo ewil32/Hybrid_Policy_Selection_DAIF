@@ -74,7 +74,7 @@ for agent_num in range(num_agents):
                                train_habit_net=True,
                                train_prior_model=True,
                                train_tran=True,
-                               train_after_exploring=True,
+                               train_during_episode=True,
                                train_with_replay=True,
                                use_fast_thinking=True,
                                habit_model_type="PG",
@@ -114,7 +114,7 @@ for agent_num in range(num_agents):
     # Switch on HABIT if it wasn't already on
     daifa.habit_action_model.show_training = False
     daifa.train_habit_net = True
-    daifa.train_after_exploring = True
+    daifa.train_during_episode = True
     daifa.use_fast_thinking = True
     daifa.uncertainty_tolerance = 0.1
 

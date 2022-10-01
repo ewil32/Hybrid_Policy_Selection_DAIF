@@ -1,8 +1,7 @@
 import gym
 import tensorflow as tf
 import numpy as np
-from agent_experiments import basic_experiment
-from util import transform_observations
+from experiments.agent_experiments import habit_action_A2C_experiment
 
 # Hide GPU from visible devices
 tf.config.set_visible_devices([], 'GPU')
@@ -14,7 +13,7 @@ encoder_params = {
 }
 
 decoder_params = {
-    "input_dim": 2,
+    "output_dim": 2,
     "latent_dim": 2,
     "hidden_units": [20]
 }
@@ -47,20 +46,19 @@ prior_params = {
     "use_tanh_on_output": False
 }
 
-observation_max = np.array([0.6, 0.07])
-observation_min = np.array([-1.2, -0.07])
-observation_noise_stddev = [0.05, 0.05]
-
-# unscaled prior mean and prior stddev
-prior_mean = [0.45, 0]
-prior_stddev = [1, 1]
-scaled_prior_mean = transform_observations(prior_mean, observation_max, observation_min, [0, 0])  # no noise on prior
+a2c_model_params = {
+    "latent_dim": 2,
+    "action_dim": 1,
+    "dense_units": [16, 16],
+    "action_std_dev": 0.05,
+    "train_epochs": 2,
+    "show_training": False,
+    "discount_factor": 0.99
+}
 
 agent_params = {
-    "prior_model": None,
-    "habit_model": None,
-    "given_prior_mean": scaled_prior_mean,
-    "given_prior_stddev": prior_stddev,
+    "given_prior_mean": None,
+    "given_prior_stddev": None,
     "agent_time_ratio": 6,
     "actions_to_execute_when_exploring": 2,
     "planning_horizon": 5,
@@ -69,28 +67,36 @@ agent_params = {
     "n_policy_candidates": 70,
     "train_vae": True,
     'train_tran': True,
-    "train_prior_model": False,
-    "train_habit_net": False,
+    "train_prior_model": True,
+    "train_habit_net": True,
     "train_with_replay": True,
     "train_after_exploring": True,
     "use_kl_extrinsic": True,
     "use_kl_intrinsic": True,
     "use_FEEF": False,
-    "use_fast_thinking": False,
+    "use_fast_thinking": True,
     "uncertainty_tolerance": 0.1,
-    "habit_model_type": None
+    "habit_model_type": "PG"
 }
 
-VAE_RUNS = 50
-TRAN_RUNS = 30
-FLIP_DYNAMICS_RUNS = 0
+observation_max = np.array([0.6, 0.07])
+observation_min = np.array([-1.2, -0.07])
+observation_noise_stddev = [0.05, 0.05]
 
-experiment_name = "basic_VAE_halting"
+num_agents = 10
+
+VAE_RUNS = 6
+TRAN_RUNS = 2
+HABIT_RUNS = 2
+FLIP_DYNAMICS_RUNS = 4
+EPISODES_BETWEEN_HABIT_TESTS = 10
+
+experiment_name = "A2C_train_from_start"
 
 # train the agent on the env
 env = gym.make('MountainCarContinuous-v0')
 
-basic_experiment(experiment_name,
+habit_action_A2C_experiment(experiment_name,
                             env,
                             observation_min,
                             observation_max,
@@ -98,9 +104,14 @@ basic_experiment(experiment_name,
                             num_agents,
                             VAE_RUNS,
                             TRAN_RUNS,
+                            HABIT_RUNS,
                             FLIP_DYNAMICS_RUNS,
+                            EPISODES_BETWEEN_HABIT_TESTS,
                             encoder_params,
                             decoder_params,
                             vae_params,
                             tran_params,
+                            prior_params,
+                            a2c_model_params,
                             agent_params)
+
