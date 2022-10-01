@@ -30,7 +30,8 @@ class DAIFAgent:
                  use_fast_thinking=False,
                  uncertainty_tolerance=0.05,
                  habit_model_type="name_of_model",
-                 min_rewards_needed_to_train_prior=0):
+                 min_rewards_needed_to_train_prior=0,
+                 prior_model_scaling_factor):
 
         super(DAIFAgent, self).__init__()
 
@@ -58,6 +59,7 @@ class DAIFAgent:
         # given prior values
         self.given_prior_mean = given_prior_mean
         self.given_prior_stddev = given_prior_stddev
+        self.prior_model_scaling_factor = prior_model_scaling_factor
 
         # full vae
         self.model_vae = vae
@@ -490,7 +492,7 @@ class DAIFAgent:
 
                 # Compute the extrinisc approximation with the prior model
                 else:
-                    kl_extrinsic = self.prior_model.extrinsic_kl(predicted_likelihood)
+                    kl_extrinsic = 1 - self.prior_model_scaling_factor * self.prior_model(predicted_posterior)
                     kl_extrinsic = tf.reduce_sum(kl_extrinsic, axis=-1)
 
             # if we don't use extrinsic set it to zero
@@ -562,7 +564,7 @@ class DAIFAgent:
                 # TODO Can I use the learned prior model here?
                 else:
                     # efe_extrinsic = self.prior_model.extrinsic_kl(predicted_likelihood)
-                    efe_extrinsic = self.prior_model.extrinsic_kl(predicted_posterior)
+                    efe_extrinsic = 1 - self.prior_model_scaling_factor * self.prior_model.extrinsic_kl(predicted_posterior)
                     efe_extrinsic = tf.reduce_sum(efe_extrinsic, axis=-1)
 
             # if we don't use extrinsic set it to zero

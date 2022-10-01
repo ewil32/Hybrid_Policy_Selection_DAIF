@@ -31,7 +31,8 @@ class DAIFAgentRecurrent:
                  use_fast_thinking=False,
                  uncertainty_tolerance=0.05,
                  habit_model_type="name_of_model",
-                 min_rewards_needed_to_train_prior=0):
+                 min_rewards_needed_to_train_prior=0,
+                 prior_model_scaling_factor=1):
 
         super(DAIFAgentRecurrent, self).__init__()
 
@@ -59,6 +60,7 @@ class DAIFAgentRecurrent:
         # given prior values
         self.given_prior_mean = given_prior_mean
         self.given_prior_stddev = given_prior_stddev
+        self.prior_model_scaling_factor = prior_model_scaling_factor
 
         # full vae
         self.model_vae = vae
@@ -211,7 +213,6 @@ class DAIFAgentRecurrent:
                     self.exploring = True
 
 
-
             # finally update the previous observation and action to be the one we just had/did
             self.previous_observation = observation
             self.prev_tran_hidden_state = self.tran_hidden_state
@@ -232,14 +233,8 @@ class DAIFAgentRecurrent:
             return None, None
         else:
             z_mean, z_std, z = self.model_vae.encoder(obs)
-            # print(z_mean.shape)
-            # print(action.shape)
             z_mean = z_mean.numpy()
             z_plus_action = np.concatenate([z_mean, action], axis=1)
-            # print(z_mean)
-            # print(action)
-            # print(z_plus_action)
-
             z_plus_action = z_plus_action.reshape(1, 1, z_plus_action.shape[1])
             # print(z_plus_action)
 
@@ -330,9 +325,7 @@ class DAIFAgentRecurrent:
             # _, _, final_hidden_state, _ = self.tran((z_train_seq, None))
 
             z_pred, _, _, _ = self.tran((z_train_singles, h_states_for_training))
-            # print(h_states)
-            # print(final_hidden_state)
-            # print(h_states[:, -2, :])
+
             self.prev_tran_hidden_state = h_states[:, -2, :]
             self.tran_hidden_state = final_hidden_state
 
@@ -347,7 +340,6 @@ class DAIFAgentRecurrent:
         #### TRAIN THE PRIOR MODEL ####
         # TODO fix how this part should work
         if self.train_prior:
-            # self.prior_model.train(post_observations, rewards, verbose=self.show_prior_training)
             if max(rewards) > self.min_rewards_needed_to_train_prior:
                 # self.prior_model.train(post_observations, rewards)
                 self.prior_model.train(post_latent_mean, rewards)
@@ -356,37 +348,7 @@ class DAIFAgentRecurrent:
         #### TRAIN THE HABIT ACTION NET ####
         if self.train_habit_net:
 
-            # prior_preferences_mean = tf.convert_to_tensor(self.given_prior_mean, dtype="float32")
-            # prior_preferences_stddev = tf.convert_to_tensor(self.given_prior_stddev, dtype="float32")
-            #
-            # prior_dist = tfp.distributions.MultivariateNormalDiag(loc=prior_preferences_mean, scale_diag=prior_preferences_stddev)
-            #
-            # external_efe = -1 * tf.math.log(prior_dist.prob(post_observations))
-            # external_efe = external_efe.numpy().reshape(external_efe.shape[0], 1)
-            #
-            # one_over_external_efe = 1/external_efe
-            #
-            # ten_minus_external_efe = -1*external_efe + 10
-
-            # ten_minus_external_efe = ten_minus_external_efe.numpy().reshape(ten_minus_external_efe.shape[0], 1)
-
-            # one_over_external_efe = one_over_external_efe.numpy().reshape(one_over_external_efe.shape[0], 1)
-            # print(one_over_external_efe.shape)
-
-            # print(post_observations)
-            # print(one_over_external_efe)
-
-            # obs_utilities = self.prior_model(pre_observations)
-            # obs_utilities = tf.reduce_sum(obs_utilities, axis=-1)
-            # obs_utilities = obs_utilities.numpy().reshape(obs_utilities.shape[0], 1)
-            # # print(obs_utilities)
-            #
-            # cum_rewards = compute_discounted_cumulative_reward(obs_utilities, self.habit_action_model.discount_factor)
-
             if self.habit_model_type == "PG":
-                # rewards = rewards.reshape(rewards.shape[0], 1)
-                # cum_rewards = compute_discounted_cumulative_reward(rewards, self.habit_action_model.discount_factor)
-                # rewards_to_train_on = cum_rewards
 
                 # TODO I think for the final state the V(s_t+1) should be set to 0
                 # ADVANTAGE
@@ -394,10 +356,7 @@ class DAIFAgentRecurrent:
                 v_plus_one_state = self.prior_model(post_latent_mean)
                 advantage = rewards + self.prior_model.discount_factor * v_plus_one_state - v_state
 
-                # print(advantage)
-
                 # DDPG and policy gradient interface with same function
-                # self.habit_action_model.train(pre_latent_mean, actions, rewards_to_train_on, post_latent_mean)
                 self.habit_action_model.train(pre_latent_mean, actions, advantage, post_latent_mean)
 
             if self.habit_model_type == "DDPG":
@@ -588,7 +547,7 @@ class DAIFAgentRecurrent:
 
                 # Compute the extrinisc approximation with the prior model
                 else:
-                    kl_extrinsic = self.prior_model.extrinsic_kl(predicted_likelihood)
+                    kl_extrinsic = 1 - self.prior_model_scaling_factor * self.prior_model(predicted_posterior)
                     kl_extrinsic = tf.reduce_sum(kl_extrinsic, axis=-1)
 
             # if we don't use extrinsic set it to zero
@@ -660,7 +619,7 @@ class DAIFAgentRecurrent:
                 # TODO Can I use the learned prior model here?
                 else:
                     # efe_extrinsic = self.prior_model.extrinsic_kl(predicted_likelihood)
-                    efe_extrinsic = self.prior_model.extrinsic_kl(predicted_posterior)
+                    efe_extrinsic = 1 - self.prior_model_scaling_factor * self.prior_model(predicted_posterior)
                     efe_extrinsic = tf.reduce_sum(efe_extrinsic, axis=-1)
 
             # if we don't use extrinsic set it to zero

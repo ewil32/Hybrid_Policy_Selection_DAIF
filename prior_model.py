@@ -14,15 +14,13 @@ class PriorModelBellman(keras.Model):
                  discount_factor=0.99,
                  training_epochs=1,
                  show_training=True,
-                 use_tanh_on_output=True,
-                 scaling_factor=1):
+                 use_tanh_on_output=True):
 
         super(PriorModelBellman, self).__init__()
         self.observation_dim = observation_dim
         self.iterate_train = iterate_train
         self.discount_factor = discount_factor
         self.train_epochs = 1
-        self.scaling_factor = scaling_factor
 
         self.observations = []
         self.rewards = []
@@ -46,11 +44,7 @@ class PriorModelBellman(keras.Model):
 
 
     def call(self, observations):
-        return self.prior_model(observations)*self.scaling_factor
-
-
-    def extrinsic_kl(self, observations):
-        return 1.0 - self(observations)  # map from [-1, 1] to [2, 0]
+        return self.prior_model(observations)
 
 
     def train(self, observations, rewards):
