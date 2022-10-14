@@ -62,7 +62,7 @@ agent_params = {
     "train_prior_model": False,
     "train_habit_net": False,
     "train_with_replay": True,
-    "train_during_episode": False,
+    "train_during_episode": True,
     "use_kl_extrinsic": True,
     "use_kl_intrinsic": True,
     "use_FEEF": False,
@@ -71,12 +71,12 @@ agent_params = {
     "habit_model_type": None
 }
 
-VAE_RUNS = 150
-TRAN_RUNS = 0
+VAE_RUNS = 60
+TRAN_RUNS = 90
 FLIP_DYNAMICS_RUNS = 0
 num_agents = 50
 
-experiment_name = "../../experiment_results/base_EFE_only_replay"
+experiment_name = "../../experiment_results/VAE_halting_EFE"
 
 # train the agent on the env
 env = gym.make('MountainCarContinuous-v0')

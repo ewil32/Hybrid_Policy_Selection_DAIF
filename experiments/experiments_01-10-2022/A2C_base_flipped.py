@@ -68,13 +68,13 @@ agent_params = {
     "train_vae": True,
     'train_tran': True,
     "train_prior_model": True,
-    "train_habit_net": False,
+    "train_habit_net": True,
     "train_with_replay": True,
     "train_during_episode": True,
     "use_kl_extrinsic": True,
     "use_kl_intrinsic": True,
     "use_FEEF": False,
-    "use_fast_thinking": False,
+    "use_fast_thinking": True,
     "uncertainty_tolerance": 0.1,
     "habit_model_type": "A2C",
     "min_rewards_needed_to_train_prior": -10,
@@ -88,12 +88,12 @@ observation_noise_stddev = [0.05, 0.05]
 num_agents = 50
 
 VAE_RUNS = 6
-TRAN_RUNS = 0
-HABIT_RUNS = 4
+TRAN_RUNS = 2
+HABIT_RUNS = 2
 FLIP_DYNAMICS_RUNS = 5
 EPISODES_BETWEEN_HABIT_TESTS = 10
 
-experiment_name = "../../experiment_results/A2C_train_after_VAE_flipped"
+experiment_name = "../../experiment_results/A2C_from_start_flipped"
 
 # train the agent on the env
 env = gym.make('MountainCarContinuous-v0')

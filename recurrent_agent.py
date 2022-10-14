@@ -124,20 +124,21 @@ class DAIFAgentRecurrent:
         self.env_time_scale_observations.append(observation)
 
         # if the episode is finished, then do any training on the full data set
-        if done and self.train_with_replay:
+        if done:
 
-            print("training on full data")
             print(self.num_fast_thinking_choices, len(self.full_action_sequence))
 
             # add the final observation and reward we observed to the sequences
             self.full_observation_sequence.append(observation)
             self.full_reward_sequence.append(reward)
 
-            # Call the training function on the observation sequences to train everything we need to train
-            self.train_models(np.vstack(self.full_observation_sequence),
-                              np.vstack(self.full_action_sequence),
-                              np.array(self.full_reward_sequence),
-                              None)
+            if self.train_with_replay:
+                print("training on full data")
+                # Call the training function on the observation sequences to train everything we need to train
+                self.train_models(np.vstack(self.full_observation_sequence),
+                                  np.vstack(self.full_action_sequence),
+                                  np.array(self.full_reward_sequence),
+                                  None)
 
 
         # Otherwise are we at a point where we can reconsider our policy and maybe train the world model
@@ -416,7 +417,10 @@ class DAIFAgentRecurrent:
         action = self.habit_action_model.select_action(latent_state)
         # print(action)
         # print(tfp.distributions.MultivariateNormalDiag(loc=action, scale_diag=[self.habit_action_model.action_std_dev]).sample())
-        return tfp.distributions.MultivariateNormalDiag(loc=action, scale_diag=[self.habit_action_model.action_std_dev]).sample()
+        if self.habit_model_type == "A2C":
+            return tfp.distributions.MultivariateNormalDiag(loc=action, scale_diag=[self.habit_action_model.action_std_dev]).sample()
+        elif self.habit_model_type == "DDPG":
+            return action
         # return action
 
 

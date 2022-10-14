@@ -15,7 +15,7 @@ import pandas as pd
 ####################################################################
 
 def habit_action_A2C_experiment(
-        experiment_name,
+        experiment_save_path,
         env,
         observation_min,
         observation_max,
@@ -141,15 +141,15 @@ def habit_action_A2C_experiment(
     all_habit_results = pd.concat(all_habit_results)
     all_habit_results = all_habit_results.reset_index(drop=True)
 
-    all_results.to_csv(f"../experiment_results/{experiment_name}_agent_results.csv")
-    all_habit_results.to_csv(f"../experiment_results/{experiment_name}_habit_results.csv")
+    all_results.to_csv(f"{experiment_save_path}_agent_results.csv")
+    all_habit_results.to_csv(f"{experiment_save_path}_habit_results.csv")
 
     print("EXPERIMENT FINISHED")
 
 
 
 def habit_action_DDPG_experiment(
-        experiment_name,
+        experiment_save_path,
         env,
         observation_min,
         observation_max,
@@ -167,7 +167,8 @@ def habit_action_DDPG_experiment(
         prior_params,
         actor_params,
         critic_params,
-        agent_params):
+        agent_params,
+        ddpg_buffer_size=1000):
 
     # track experiment results
     all_results = []
@@ -196,7 +197,7 @@ def habit_action_DDPG_experiment(
         target_critic.set_weights(critic_model.get_weights())
         critic_optimizer = tf.keras.optimizers.Adam(0.0001)
         actor_optimizer = tf.keras.optimizers.Adam(0.00005)
-        habit_net = BasicDDPG(actor_model, critic_model, target_actor, target_critic, tau=0.005, critic_optimizer=critic_optimizer, actor_optimizer=actor_optimizer)
+        habit_net = BasicDDPG(actor_model, critic_model, target_actor, target_critic, tau=0.005, buffer_capacity=ddpg_buffer_size, critic_optimizer=critic_optimizer, actor_optimizer=actor_optimizer)
 
         # make the PRIOR NET
         prior_model = PriorModelBellman(**prior_params)
@@ -285,8 +286,8 @@ def habit_action_DDPG_experiment(
     all_habit_results = pd.concat(all_habit_results)
     all_habit_results = all_habit_results.reset_index(drop=True)
 
-    all_results.to_csv(f"../experiment_results/{experiment_name}_agent_results.csv")
-    all_habit_results.to_csv(f"../experiment_results/{experiment_name}_habit_results.csv")
+    all_results.to_csv(f"{experiment_save_path}_agent_results.csv")
+    all_habit_results.to_csv(f"{experiment_save_path}_habit_results.csv")
 
     print("EXPERIMENT FINISHED")
 
@@ -363,7 +364,7 @@ def basic_experiment(
     all_results = pd.concat(all_results)
     all_results = all_results.reset_index(drop=True)
 
-    all_results.to_csv(f"../experiment_results/{experiment_name}_agent_results.csv")
+    all_results.to_csv(f"{experiment_name}_agent_results.csv")
 
     print("EXPERIMENT FINISHED")
 
@@ -440,6 +441,6 @@ def experiment_with_prior_model(
     all_results = pd.concat(all_results)
     all_results = all_results.reset_index(drop=True)
 
-    all_results.to_csv(f"../experiment_results/{experiment_name}_agent_results.csv")
+    all_results.to_csv(f"{experiment_name}_agent_results.csv")
 
     print("EXPERIMENT FINISHED")

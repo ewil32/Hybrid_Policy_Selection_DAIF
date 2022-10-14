@@ -78,7 +78,7 @@ agent_params = {
     "uncertainty_tolerance": 0.1,
     "habit_model_type": "A2C",
     "min_rewards_needed_to_train_prior": -10,
-    "prior_model_scaling_factor": 0.01
+    "prior_model_scaling_factor": 1
 }
 
 observation_max = np.array([0.6, 0.07])

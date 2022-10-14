@@ -1,7 +1,7 @@
 import gym
 import tensorflow as tf
 import numpy as np
-from experiments.agent_experiments import habit_action_A2C_experiment
+from experiments.agent_experiments import habit_action_DDPG_experiment
 
 # Hide GPU from visible devices
 tf.config.set_visible_devices([], 'GPU')
@@ -46,14 +46,14 @@ prior_params = {
     "use_tanh_on_output": False
 }
 
-a2c_model_params = {
-    "latent_dim": 2,
-    "action_dim": 1,
-    "dense_units": [16, 16],
-    "action_std_dev": 0.05,
-    "train_epochs": 2,
-    "show_training": False,
-    "discount_factor": 0.99
+actor_params = {
+    "observation_dim": 2,
+    "action_max": 1
+}
+
+critic_params = {
+    "observation_dim": 2,
+    "action_dim": 1
 }
 
 agent_params = {
@@ -76,44 +76,46 @@ agent_params = {
     "use_FEEF": False,
     "use_fast_thinking": True,
     "uncertainty_tolerance": 0.1,
-    "habit_model_type": "A2C",
+    "habit_model_type": "DDPG",
     "min_rewards_needed_to_train_prior": -10,
-    "prior_model_scaling_factor": 0.01
+    "prior_model_scaling_factor": 1
 }
 
 observation_max = np.array([0.6, 0.07])
 observation_min = np.array([-1.2, -0.07])
 observation_noise_stddev = [0.05, 0.05]
 
-num_agents = 2
+num_agents = 50
 
 VAE_RUNS = 6
-TRAN_RUNS = 2
-HABIT_RUNS = 2
-FLIP_DYNAMICS_RUNS = 5
+TRAN_RUNS = 9
+HABIT_RUNS = 0
+FLIP_DYNAMICS_RUNS = 0
 EPISODES_BETWEEN_HABIT_TESTS = 10
 
-experiment_name = "A2C_train_from_start"
+experiment_name = "../../experiment_results/DDPG_long_run_500_buffer"
 
 # train the agent on the env
 env = gym.make('MountainCarContinuous-v0')
 
-habit_action_A2C_experiment(experiment_name,
-                            env,
-                            observation_min,
-                            observation_max,
-                            observation_noise_stddev,
-                            num_agents,
-                            VAE_RUNS,
-                            TRAN_RUNS,
-                            HABIT_RUNS,
-                            FLIP_DYNAMICS_RUNS,
-                            EPISODES_BETWEEN_HABIT_TESTS,
-                            encoder_params,
-                            decoder_params,
-                            vae_params,
-                            tran_params,
-                            prior_params,
-                            a2c_model_params,
-                            agent_params)
+habit_action_DDPG_experiment(experiment_name,
+                             env,
+                             observation_min,
+                             observation_max,
+                             observation_noise_stddev,
+                             num_agents,
+                             VAE_RUNS,
+                             TRAN_RUNS,
+                             HABIT_RUNS,
+                             FLIP_DYNAMICS_RUNS,
+                             EPISODES_BETWEEN_HABIT_TESTS,
+                             encoder_params,
+                             decoder_params,
+                             vae_params,
+                             tran_params,
+                             prior_params,
+                             actor_params,
+                             critic_params,
+                             agent_params,
+                             ddpg_buffer_size=500)
 

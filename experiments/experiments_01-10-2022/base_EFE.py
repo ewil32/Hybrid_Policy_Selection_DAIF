@@ -76,7 +76,7 @@ TRAN_RUNS = 0
 FLIP_DYNAMICS_RUNS = 0
 num_agents = 50
 
-experiment_name = "base_EFE"
+experiment_name = "../../experiment_results/base_EFE_train_only_during_episode"
 
 # train the agent on the env
 env = gym.make('MountainCarContinuous-v0')
