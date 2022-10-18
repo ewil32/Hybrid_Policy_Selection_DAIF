@@ -2,11 +2,11 @@ from vae_recurrent import VAE, create_decoder, create_encoder
 from transition_gru import TransitionGRU
 from recurrent_agent import DAIFAgentRecurrent
 from prior_model import PriorModelBellman
-from habitual_action_network import HabitualAction, compute_discounted_cumulative_reward
+from habitual_action_network import HabitualAction, compute_discounted_cumulative_reward, A2CAgent
 from ddpg import *
 
 from util import random_observation_sequence, transform_observations, test_policy, habit_policy
-from train_agent import train_single_agent
+from train_agent import train_single_agent, train_single_model_free_agent
 import pandas as pd
 
 
@@ -369,6 +369,10 @@ def basic_experiment(
     print("EXPERIMENT FINISHED")
 
 
+####################################################################
+#                BASIC EXPERIMENT WITH PRIOR MODEL                 #
+####################################################################
+
 def experiment_with_prior_model(
         experiment_name,
         env,
@@ -442,5 +446,188 @@ def experiment_with_prior_model(
     all_results = all_results.reset_index(drop=True)
 
     all_results.to_csv(f"{experiment_name}_agent_results.csv")
+
+    print("EXPERIMENT FINISHED")
+
+
+####################################################################
+#              BASIC EXPERIMENT WITH MODEL-FREE DDPG               #
+####################################################################
+
+def experiment_model_free_ddpg(
+        experiment_name,
+        env,
+        observation_min,
+        observation_max,
+        observation_noise_stddev,
+        num_agents,
+        normal_runs,
+        flip_dynamics_runs,
+        episodes_between_habit_tests,
+        actor_params,
+        critic_params,
+        ddpg_buffer_size,
+        ddpg_agent_time_ratio):
+
+    # track experiment results
+    all_results = []
+    all_habit_results = []
+
+    for agent_num in range(num_agents):
+
+        # # make the HABIT ACTION NET
+        actor_model = get_actor(**actor_params)
+        critic_model = get_critic(**critic_params)
+        target_actor = get_actor(**actor_params)
+        target_critic = get_critic(**critic_params)
+
+        # Making the weights equal initially
+        target_actor.set_weights(actor_model.get_weights())
+        target_critic.set_weights(critic_model.get_weights())
+        critic_optimizer = tf.keras.optimizers.Adam(0.0001)
+        actor_optimizer = tf.keras.optimizers.Adam(0.00005)
+
+        ou_noise = OUActionNoise(np.zeros(1), np.ones(1)*0.2)
+
+        ddpg_agent = DDPGAgent(agent_time_ratio=ddpg_agent_time_ratio, ou_noise=ou_noise, actor=actor_model, critic=critic_model, target_actor=target_actor, target_critic=target_critic, tau=0.005, buffer_capacity=ddpg_buffer_size, critic_optimizer=critic_optimizer, actor_optimizer=actor_optimizer)
+
+        # store and track results for this agent
+        full_run_results = []
+        full_run_habit_results = []
+        habit_run_number = 0
+
+        # Some epochs of VAE
+        for n in range(normal_runs):
+
+            ddpg_agent, results = train_single_model_free_agent(env, ddpg_agent, observation_max, observation_min, observation_noise_stddev, num_episodes=episodes_between_habit_tests, render_env=False)
+            full_run_results.append(results)
+
+            p = ddpg_agent.select_action
+            res = test_policy(env, p, observation_max, observation_min, observation_noise_stddev, 20, ddpg_agent.agent_time_ratio)
+            res["run_num"] = habit_run_number
+            habit_run_number += 1
+            full_run_habit_results.append(res)
+
+        # Flip the dynamics
+        for n in range(flip_dynamics_runs):
+
+            ddpg_agent, results = train_single_model_free_agent(env, ddpg_agent, observation_max, observation_min, observation_noise_stddev, num_episodes=episodes_between_habit_tests, render_env=False, flip_dynamics=True)
+            full_run_results.append(results)
+
+            p = ddpg_agent.select_action
+            res = test_policy(env, p, observation_max, observation_min, observation_noise_stddev, 20, ddpg_agent.agent_time_ratio)
+            res["run_num"] = habit_run_number
+            habit_run_number += 1
+            full_run_habit_results.append(res)
+
+        # collect the results for this agent
+        full_run_results = pd.concat(full_run_results)
+        full_run_results = full_run_results.reset_index(drop=True)
+        full_run_results["episode"] = full_run_results.index
+        full_run_results["agent_id"] = agent_num
+
+        full_run_habit_results = pd.concat(full_run_habit_results)
+        full_run_habit_results["agent_id"] = agent_num
+
+        # add the results to all the agents
+        all_results.append(full_run_results)
+        all_habit_results.append(full_run_habit_results)
+
+    # write the final results to csv
+    all_results = pd.concat(all_results)
+    all_results = all_results.reset_index(drop=True)
+    all_habit_results = pd.concat(all_habit_results)
+    all_habit_results = all_habit_results.reset_index(drop=True)
+
+    all_results.to_csv(f"{experiment_name}_agent_results.csv")
+    all_habit_results.to_csv(f"{experiment_name}_habit_results.csv")
+
+    print("EXPERIMENT FINISHED")
+
+
+####################################################################
+#              BASIC EXPERIMENT WITH MODEL-FREE A2C                #
+####################################################################
+
+def experiment_model_free_a2c(
+        experiment_name,
+        env,
+        observation_min,
+        observation_max,
+        observation_noise_stddev,
+        num_agents,
+        normal_runs,
+        flip_dynamics_runs,
+        episodes_between_habit_tests,
+        prior_params,
+        a2c_params,
+        a2c_agent_time_ratio):
+
+    # track experiment results
+    all_results = []
+    all_habit_results = []
+
+    for agent_num in range(num_agents):
+
+        # # make the HABIT ACTION NET
+        policy_net = HabitualAction(**a2c_params)
+        policy_net.compile(optimizer=tf.keras.optimizers.Adam())
+
+        # make the PRIOR NET
+        value_net = PriorModelBellman(**prior_params)
+
+        # make the agent
+        a2c_agent = A2CAgent(policy_net=policy_net, value_net=value_net, agent_time_ratio=a2c_agent_time_ratio)
+
+        # store and track results for this agent
+        full_run_results = []
+        full_run_habit_results = []
+        habit_run_number = 0
+
+        # Some epochs of VAE
+        for n in range(normal_runs):
+
+            a2c_agent, results = train_single_model_free_agent(env, a2c_agent, observation_max, observation_min, observation_noise_stddev, num_episodes=episodes_between_habit_tests, render_env=False)
+            full_run_results.append(results)
+
+            p = a2c_agent.policy_net
+            res = test_policy(env, p, observation_max, observation_min, observation_noise_stddev, 20, a2c_agent.agent_time_ratio)
+            res["run_num"] = habit_run_number
+            habit_run_number += 1
+            full_run_habit_results.append(res)
+
+        # Flip the dynamics
+        for n in range(flip_dynamics_runs):
+
+            a2c_agent, results = train_single_model_free_agent(env, a2c_agent, observation_max, observation_min, observation_noise_stddev, num_episodes=episodes_between_habit_tests, render_env=False, flip_dynamics=True)
+            full_run_results.append(results)
+
+            p = a2c_agent.policy_net
+            res = test_policy(env, p, observation_max, observation_min, observation_noise_stddev, 20, a2c_agent.agent_time_ratio)
+            res["run_num"] = habit_run_number
+            habit_run_number += 1
+            full_run_habit_results.append(res)
+
+        # collect the results for this agent
+        full_run_results = pd.concat(full_run_results)
+        full_run_results = full_run_results.reset_index(drop=True)
+        full_run_results["episode"] = full_run_results.index
+        full_run_results["agent_id"] = agent_num
+
+        full_run_habit_results = pd.concat(full_run_habit_results)
+        full_run_habit_results["agent_id"] = agent_num
+
+        # add the results to all the agents
+        all_results.append(full_run_results)
+        all_habit_results.append(full_run_habit_results)
+
+    # write the final results to csv
+    all_results = pd.concat(all_results)
+    all_results = all_results.reset_index(drop=True)
+    all_habit_results = pd.concat(all_habit_results)
+    all_habit_results = all_habit_results.reset_index(drop=True)
+
+    all_results.to_csv(f"{experiment_name}_agent_results.csv")
+    all_habit_results.to_csv(f"{experiment_name}_habit_results.csv")
 
     print("EXPERIMENT FINISHED")

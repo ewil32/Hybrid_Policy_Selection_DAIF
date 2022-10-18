@@ -1,0 +1,3 @@
+,episode,success,sim_steps,noise_stddev,total_reward,agent_time_ratio,agent_id
+0,0,False,999,"[0, 0]",-4.697164322606318,6,0
+1,0,False,999,"[0, 0]",-5.448627765603647,6,1

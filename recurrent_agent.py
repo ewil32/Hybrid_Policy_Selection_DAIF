@@ -421,7 +421,6 @@ class DAIFAgentRecurrent:
             return tfp.distributions.MultivariateNormalDiag(loc=action, scale_diag=[self.habit_action_model.action_std_dev]).sample()
         elif self.habit_model_type == "DDPG":
             return action
-        # return action
 
 
     def select_policy(self, observation):

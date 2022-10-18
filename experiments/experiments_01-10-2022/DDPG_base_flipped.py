@@ -48,12 +48,16 @@ prior_params = {
 
 actor_params = {
     "observation_dim": 2,
-    "action_max": 1
+    "action_max": 1,
+    "hidden_units": [16, 16]
 }
 
 critic_params = {
     "observation_dim": 2,
-    "action_dim": 1
+    "action_dim": 1,
+    "state_hidden_units": [16],
+    "action_hidden_units": [16],
+    "out_hidden_units": [20]
 }
 
 agent_params = {

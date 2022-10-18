@@ -147,14 +147,19 @@ class BasicDDPG:
             print()
 
 
-def get_actor(observation_dim, action_max):
+def get_actor(observation_dim, action_max, hidden_units=[16, 32, 16]):
     # Initialize weights between -3e-3 and 3-e3
     last_init = tf.random_uniform_initializer(minval=-0.003, maxval=0.003)
 
     inputs = layers.Input(shape=(observation_dim,))
-    out = layers.Dense(16, activation="relu")(inputs)
-    out = layers.Dense(32, activation="relu")(out)
-    out = layers.Dense(16, activation="relu")(out)
+    out = inputs
+    for h in hidden_units:
+        out = layers.Dense(h, activation="relu")(out)
+
+    # out = layers.Dense(16, activation="relu")(inputs)
+    # out = layers.Dense(32, activation="relu")(out)
+    # out = layers.Dense(16, activation="relu")(out)
+
     outputs = layers.Dense(1, activation="tanh", kernel_initializer=last_init)(out)
 
     # Our upper bound is 2.0 for Pendulum.
@@ -163,22 +168,34 @@ def get_actor(observation_dim, action_max):
     return model
 
 
-def get_critic(observation_dim, action_dim):
+def get_critic(observation_dim, action_dim, state_hidden_units=[16, 32], action_hidden_units=[32], out_hidden_units=[128, 128]):
     # State as input
     state_input = layers.Input(shape=observation_dim)
-    state_out = layers.Dense(16, activation="relu")(state_input)
-    state_out = layers.Dense(32, activation="relu")(state_out)
+    state_out = state_input
+    for h in state_hidden_units:
+        state_out = layers.Dense(h, activation="relu")(state_out)
+
+    # state_out = layers.Dense(16, activation="relu")(state_input)
+    # state_out = layers.Dense(32, activation="relu")(state_out)
 
     # Action as input
     action_input = layers.Input(shape=action_dim)
-    action_out = layers.Dense(32, activation="relu")(action_input)
+    action_out = action_input
+    for h in action_hidden_units:
+        action_out = layers.Dense(h, activation="relu")(action_out)
+
+    # action_out = layers.Dense(32, activation="relu")(action_input)
 
     # Both are passed through seperate layer before concatenating
     concat = layers.Concatenate()([state_out, action_out])
 
     # was 256
-    out = layers.Dense(128, activation="relu")(concat)
-    out = layers.Dense(128, activation="relu")(out)
+    out = concat
+    for h in out_hidden_units:
+        out = layers.Dense(h, activation="relu")(out)
+
+    # out = layers.Dense(128, activation="relu")(concat)
+    # out = layers.Dense(128, activation="relu")(out)
     outputs = layers.Dense(1)(out)
 
     # Outputs single value for give state-action
@@ -193,3 +210,96 @@ def get_critic(observation_dim, action_dim):
 def update_target(target_weights, weights, tau):
     for (a, b) in zip(target_weights, weights):
         a.assign(b * tau + a * (1 - tau))
+
+
+class OUActionNoise:
+    def __init__(self, mean, std_deviation, theta=0.15, dt=1e-2, x_initial=None):
+        self.theta = theta
+        self.mean = mean
+        self.std_dev = std_deviation
+        self.dt = dt
+        self.x_initial = x_initial
+        self.reset()
+
+    def __call__(self):
+        # Formula taken from https://www.wikipedia.org/wiki/Ornstein-Uhlenbeck_process.
+        x = (
+                self.x_prev
+                + self.theta * (self.mean - self.x_prev) * self.dt
+                + self.std_dev * np.sqrt(self.dt) * np.random.normal(size=self.mean.shape)
+        )
+        # Store x into x_prev
+        # Makes next noise dependent on current one
+        self.x_prev = x
+        return x
+
+    def reset(self):
+        if self.x_initial is not None:
+            self.x_prev = self.x_initial
+        else:
+            self.x_prev = np.zeros_like(self.mean)
+
+
+class DDPGAgent(BasicDDPG):
+
+    def __init__(self, ou_noise, agent_time_ratio, **kwargs):
+        super(DDPGAgent, self).__init__(**kwargs)
+
+        self.ou_noise = ou_noise
+
+        self.previous_action = None
+        self.previous_observation = None
+        self.reward_this_run = []
+
+        self.timestep = 0
+        self.agent_time_ratio = agent_time_ratio
+
+    def perceive_and_act(self, observation, reward=None, done=False):
+
+        if done:
+            self.record((self.previous_observation, self.previous_action, reward, observation))
+
+            self.learn()
+            self.update_actor_target()
+            self.update_critic_target()
+
+            self.reward_this_run.append(reward)
+
+        elif self.timestep % self.agent_time_ratio == 0:
+            # select the next action
+            action = tf.squeeze(self.select_action(observation)).numpy()
+            action += self.ou_noise()
+
+            # train if we need to
+            if self.previous_action is not None:
+                self.record((self.previous_observation, self.previous_action, reward, observation))
+
+                self.learn()
+                self.update_actor_target()
+                self.update_critic_target()
+
+                self.reward_this_run.append(reward)
+
+            # update previous values
+            self.previous_action = action
+            self.previous_observation = observation
+            self.timestep += 1
+
+            return action
+
+        else:
+            self.timestep += 1
+            return self.previous_action
+
+
+    def reset_all_states(self, reset_buffer=False):
+
+        self.ou_noise.reset()
+        self.previous_observation = None
+        self.previous_action = None
+        self.timestep = 0
+        self.reward_this_run = []
+
+        if reset_buffer:
+            self.buffer.clear()
+

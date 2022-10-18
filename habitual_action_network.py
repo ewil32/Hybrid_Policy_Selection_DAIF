@@ -122,7 +122,6 @@ def compute_discounted_cumulative_reward(rewards, discount_factor):
     return cumulative_discounted_rewards
 
 
-
 def log_likelihood_gaussian(pred, target, variance, use_consts=True):
 
     log_prob = -1 * ((pred - target)**2/(2*variance))
@@ -132,3 +131,83 @@ def log_likelihood_gaussian(pred, target, variance, use_consts=True):
         log_prob += const
 
     return tf.reduce_sum(log_prob, axis=1)
+
+
+class A2CAgent:
+
+    def __init__(self, policy_net, value_net, agent_time_ratio):
+        self.policy_net = policy_net
+        self.value_net = value_net
+
+        self.observation_sequence = []
+        self.action_sequence = []
+        self.reward_this_run = []
+
+        self.previous_action = None
+
+        self.timestep = 0
+        self.agent_time_ratio = agent_time_ratio
+
+    def perceive_and_act(self, observation, reward=None, done=False):
+        # print(observation)
+        if done:
+
+            self.reward_this_run.append(reward)
+            self.observation_sequence.append(observation)
+            self.observation_sequence = np.vstack(self.observation_sequence)
+            self.action_sequence = np.array(self.action_sequence)
+            self.reward_this_run = np.array(self.reward_this_run).reshape(len(self.reward_this_run), 1)
+            # print(self.action_sequence.shape)
+            # print(self.reward_this_run.shape)
+
+            pre_obs = self.observation_sequence[0:-1]
+            post_obs = self.observation_sequence[1:]
+
+            # print(self.observation_sequence.shape)
+
+            # train value model
+            self.value_net.train(post_obs, self.reward_this_run)
+
+            # calculate advantage
+            v_state = self.value_net(pre_obs)
+            v_plus_one_state = self.value_net(post_obs)
+            # print(v_state.shape)
+            # print(v_plus_one_state.shape)
+            advantage = self.reward_this_run + self.value_net.discount_factor * v_plus_one_state - v_state
+
+            # train habit net
+            self.policy_net.train(pre_obs, self.action_sequence, advantage, post_obs)
+
+        elif self.timestep % self.agent_time_ratio == 0:
+
+            # select the next action
+            action = self.policy_net(observation)
+            action = tfp.distributions.MultivariateNormalDiag(loc=action, scale_diag=[self.policy_net.action_std_dev]).sample()
+            # print(action)
+            action = [tf.squeeze(action).numpy()]
+            # print(action)
+
+            # update previous values
+            self.previous_action = action
+            self.observation_sequence.append(observation)
+            self.action_sequence.append(action)
+            self.timestep += 1
+
+            if reward is not None:
+                self.reward_this_run.append(reward)
+
+            return action
+
+        else:
+            self.timestep += 1
+            return self.previous_action
+
+
+    def reset_all_states(self):
+
+        self.observation_sequence = []
+        self.action_sequence = []
+        self.reward_this_run = []
+
+        self.timestep = 0
+        self.previous_action = None
