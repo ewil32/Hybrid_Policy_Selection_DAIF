@@ -119,7 +119,7 @@ def test_policy(env, policy_func, observation_max, observation_min, obs_stddev, 
 def habit_policy(agent):
 
     def f(obs):
-        action = agent.select_fast_thinking_policy(obs)
+        action = agent.select_habit_policy(obs)
         return action
 
     return f

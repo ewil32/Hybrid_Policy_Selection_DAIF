@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 
 
 class BasicDDPG:
+    """
+    Most of the code in this class is taken and adapted from https://keras.io/examples/rl/ddpg_pendulum/
+    """
 
     def __init__(self, actor, critic, target_actor, target_critic, tau,
                  buffer_capacity=100000,
@@ -83,9 +86,6 @@ class BasicDDPG:
         self.reward_buffer = []
         self.next_state_buffer = []
 
-    # Eager execution is turned on by default in TensorFlow 2. Decorating with tf.function allows
-    # TensorFlow to build a static graph out of the logic and computations in our function.
-    # This provides a large speed up for blocks of code that contain many small TensorFlow operations such as this one.
     @tf.function
     def update(
             self, state_batch, action_batch, reward_batch, next_state_batch,
@@ -156,10 +156,6 @@ def get_actor(observation_dim, action_max, hidden_units=[16, 32, 16]):
     for h in hidden_units:
         out = layers.Dense(h, activation="relu")(out)
 
-    # out = layers.Dense(16, activation="relu")(inputs)
-    # out = layers.Dense(32, activation="relu")(out)
-    # out = layers.Dense(16, activation="relu")(out)
-
     outputs = layers.Dense(1, activation="tanh", kernel_initializer=last_init)(out)
 
     # Our upper bound is 2.0 for Pendulum.
@@ -175,16 +171,11 @@ def get_critic(observation_dim, action_dim, state_hidden_units=[16, 32], action_
     for h in state_hidden_units:
         state_out = layers.Dense(h, activation="relu")(state_out)
 
-    # state_out = layers.Dense(16, activation="relu")(state_input)
-    # state_out = layers.Dense(32, activation="relu")(state_out)
-
     # Action as input
     action_input = layers.Input(shape=action_dim)
     action_out = action_input
     for h in action_hidden_units:
         action_out = layers.Dense(h, activation="relu")(action_out)
-
-    # action_out = layers.Dense(32, activation="relu")(action_input)
 
     # Both are passed through seperate layer before concatenating
     concat = layers.Concatenate()([state_out, action_out])
@@ -194,8 +185,6 @@ def get_critic(observation_dim, action_dim, state_hidden_units=[16, 32], action_
     for h in out_hidden_units:
         out = layers.Dense(h, activation="relu")(out)
 
-    # out = layers.Dense(128, activation="relu")(concat)
-    # out = layers.Dense(128, activation="relu")(out)
     outputs = layers.Dense(1)(out)
 
     # Outputs single value for give state-action

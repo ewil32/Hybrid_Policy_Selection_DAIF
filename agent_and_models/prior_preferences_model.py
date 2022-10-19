@@ -4,7 +4,7 @@ from keras import layers
 import numpy as np
 
 
-class PriorModelBellman(keras.Model):
+class PriorPreferencesModel(keras.Model):
 
     def __init__(self,
                  observation_dim,
@@ -16,7 +16,7 @@ class PriorModelBellman(keras.Model):
                  show_training=True,
                  use_tanh_on_output=True):
 
-        super(PriorModelBellman, self).__init__()
+        super(PriorPreferencesModel, self).__init__()
         self.observation_dim = observation_dim
         self.iterate_train = iterate_train
         self.discount_factor = discount_factor

@@ -5,7 +5,7 @@ from keras import layers
 import numpy as np
 
 
-class HabitualAction(keras.Model):
+class PolicyGradientNetwork(keras.Model):
 
     def __init__(self,
                  latent_dim,
@@ -17,7 +17,7 @@ class HabitualAction(keras.Model):
                  discount_factor=0.99,
                  **kwargs):
 
-        super(HabitualAction, self).__init__(**kwargs)
+        super(PolicyGradientNetwork, self).__init__(**kwargs)
 
         habit_action_inputs = layers.Input(latent_dim)
         h = habit_action_inputs
@@ -25,10 +25,6 @@ class HabitualAction(keras.Model):
             h = layers.Dense(d, activation="relu")(h)
 
         a_mean = layers.Dense(action_dim, activation="tanh", name="z_mean")(h)
-        # a_log_sd = layers.Dense(action_dim, name="z_log_var")(h)
-        # a_stddev = tf.exp(a_log_sd)
-
-        # self.habit_action_model = keras.Model(habit_action_inputs, [a_mean, a_stddev], name="habit_action")
         self.habit_action_model = keras.Model(habit_action_inputs, a_mean, name="habit_action")
 
         # add the loss over all time steps
@@ -71,12 +67,8 @@ class HabitualAction(keras.Model):
         latent_states, outcomes = data
         true_actions, cum_discounted_reward = outcomes
 
-        # TODO what do I assume the
         with tf.GradientTape() as tape:
-            # a_mean, a_stddev = self.habit_action_model(latent_states, training=True)  # Forward pass
             a_mean = self.habit_action_model(latent_states, training=True)  # Forward pass
-
-            # print(a_mean, true_actions)
 
             log_loss = log_likelihood_gaussian(a_mean, true_actions, self.action_std_dev**2, use_consts=False)
             weighted_log_loss = log_loss * cum_discounted_reward
@@ -99,23 +91,15 @@ class HabitualAction(keras.Model):
 def compute_discounted_cumulative_reward(rewards, discount_factor):
 
     gamma = np.ones_like(rewards) * discount_factor
-    # print(gamma.shape)
     gamma_t = np.power(gamma, np.arange(rewards.shape[0]).reshape(rewards.shape[0], 1))  # discounted through time
-
-    # print(gamma_t)
-    # print(gamma_t.shape)
 
     # discounted rewards starting from the start
     discounted_rewards = np.multiply(rewards, gamma_t)
 
-    # print(rewards)
-    # print(discounted_rewards)
-
     n = rewards.shape[0]
 
-    # upper trianglur matrix with row i equal to 1/(discount_factor**i)  indexing from 0
+    # upper triangular matrix with row i equal to 1/(discount_factor**i)  indexing from 0
     discount_factor_matrix = (np.tril(np.ones((n,n))) * (1/gamma_t)).T
-    discount_factor_matrix
 
     # cumulative discounted_rewards
     cumulative_discounted_rewards = np.matmul(discount_factor_matrix, discounted_rewards)
@@ -149,7 +133,7 @@ class A2CAgent:
         self.agent_time_ratio = agent_time_ratio
 
     def perceive_and_act(self, observation, reward=None, done=False):
-        # print(observation)
+
         if done:
 
             self.reward_this_run.append(reward)
@@ -157,13 +141,9 @@ class A2CAgent:
             self.observation_sequence = np.vstack(self.observation_sequence)
             self.action_sequence = np.array(self.action_sequence)
             self.reward_this_run = np.array(self.reward_this_run).reshape(len(self.reward_this_run), 1)
-            # print(self.action_sequence.shape)
-            # print(self.reward_this_run.shape)
 
             pre_obs = self.observation_sequence[0:-1]
             post_obs = self.observation_sequence[1:]
-
-            # print(self.observation_sequence.shape)
 
             # train value model
             self.value_net.train(post_obs, self.reward_this_run)
@@ -171,8 +151,6 @@ class A2CAgent:
             # calculate advantage
             v_state = self.value_net(pre_obs)
             v_plus_one_state = self.value_net(post_obs)
-            # print(v_state.shape)
-            # print(v_plus_one_state.shape)
             advantage = self.reward_this_run + self.value_net.discount_factor * v_plus_one_state - v_state
 
             # train habit net
@@ -183,9 +161,7 @@ class A2CAgent:
             # select the next action
             action = self.policy_net(observation)
             action = tfp.distributions.MultivariateNormalDiag(loc=action, scale_diag=[self.policy_net.action_std_dev]).sample()
-            # print(action)
             action = [tf.squeeze(action).numpy()]
-            # print(action)
 
             # update previous values
             self.previous_action = action
@@ -201,7 +177,6 @@ class A2CAgent:
         else:
             self.timestep += 1
             return self.previous_action
-
 
     def reset_all_states(self):
 

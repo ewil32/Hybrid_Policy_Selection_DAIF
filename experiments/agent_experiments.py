@@ -1,11 +1,11 @@
-from vae_recurrent import VAE, create_decoder, create_encoder
-from transition_gru import TransitionGRU
-from recurrent_agent import DAIFAgentRecurrent
-from prior_model import PriorModelBellman
-from habitual_action_network import HabitualAction, compute_discounted_cumulative_reward, A2CAgent
-from ddpg import *
+from agent_and_models.vae import VAE, create_decoder, create_encoder
+from agent_and_models.transition_gru import TransitionGRU
+from agent_and_models.daif_agent import DAIFAgent
+from agent_and_models.prior_preferences_model import PriorPreferencesModel
+from agent_and_models.a2c import PolicyGradientNetwork, A2CAgent
+from agent_and_models.ddpg import *
 
-from util import random_observation_sequence, transform_observations, test_policy, habit_policy
+from util import test_policy, habit_policy
 from train_agent import train_single_agent, train_single_model_free_agent
 import pandas as pd
 
@@ -51,14 +51,14 @@ def habit_action_A2C_experiment(
         tran.compile(optimizer=tf.keras.optimizers.Adam())
 
         # # make the HABIT ACTION NET
-        habit_net = HabitualAction(**a2c_params)
+        habit_net = PolicyGradientNetwork(**a2c_params)
         habit_net.compile(optimizer=tf.keras.optimizers.Adam())
 
         # make the PRIOR NET
-        prior_model = PriorModelBellman(**prior_params)
+        prior_model = PriorPreferencesModel(**prior_params)
 
         # make the agent
-        daifa = DAIFAgentRecurrent(prior_model=prior_model, vae=vae, tran=tran, habitual_action_net=habit_net, **agent_params)
+        daifa = DAIFAgent(prior_model=prior_model, vae=vae, tran=tran, habitual_action_net=habit_net, **agent_params)
 
         # store and track results for this agent
         full_run_results = []
@@ -95,7 +95,7 @@ def habit_action_A2C_experiment(
         daifa.habit_action_model.show_training = False
         daifa.train_habit_net = True
         daifa.train_during_episode = True
-        daifa.use_fast_thinking = True
+        daifa.use_habit_policy = True
         daifa.uncertainty_tolerance = agent_params["uncertainty_tolerance"]
 
         # Train habit
@@ -145,7 +145,6 @@ def habit_action_A2C_experiment(
     all_habit_results.to_csv(f"{experiment_save_path}_habit_results.csv")
 
     print("EXPERIMENT FINISHED")
-
 
 
 def habit_action_DDPG_experiment(
@@ -200,10 +199,10 @@ def habit_action_DDPG_experiment(
         habit_net = BasicDDPG(actor_model, critic_model, target_actor, target_critic, tau=0.005, buffer_capacity=ddpg_buffer_size, critic_optimizer=critic_optimizer, actor_optimizer=actor_optimizer)
 
         # make the PRIOR NET
-        prior_model = PriorModelBellman(**prior_params)
+        prior_model = PriorPreferencesModel(**prior_params)
 
         # make the agent
-        daifa = DAIFAgentRecurrent(prior_model=prior_model, vae=vae, tran=tran, habitual_action_net=habit_net, **agent_params)
+        daifa = DAIFAgent(prior_model=prior_model, vae=vae, tran=tran, habitual_action_net=habit_net, **agent_params)
 
         # store and track results for this agent
         full_run_results = []
@@ -240,7 +239,7 @@ def habit_action_DDPG_experiment(
         daifa.habit_action_model.show_training = False
         daifa.train_habit_net = True
         daifa.train_during_episode = True
-        daifa.use_fast_thinking = True
+        daifa.use_habit_policy = True
         daifa.uncertainty_tolerance = agent_params["uncertainty_tolerance"]
 
         # Stop training VAE and fine tune tran
@@ -328,7 +327,7 @@ def basic_experiment(
         tran.compile(optimizer=tf.keras.optimizers.Adam())
 
         # make the agent
-        daifa = DAIFAgentRecurrent(vae=vae, tran=tran, **agent_params)
+        daifa = DAIFAgent(vae=vae, tran=tran, **agent_params)
 
         # store and track results for this agent
         full_run_results = []
@@ -406,10 +405,10 @@ def experiment_with_prior_model(
         tran.compile(optimizer=tf.keras.optimizers.Adam())
 
         # make the PRIOR NET
-        prior_model = PriorModelBellman(**prior_params)
+        prior_model = PriorPreferencesModel(**prior_params)
 
         # make the agent
-        daifa = DAIFAgentRecurrent(prior_model=prior_model, vae=vae, tran=tran, **agent_params)
+        daifa = DAIFAgent(prior_model=prior_model, vae=vae, tran=tran, **agent_params)
 
         # store and track results for this agent
         full_run_results = []
@@ -570,11 +569,11 @@ def experiment_model_free_a2c(
     for agent_num in range(num_agents):
 
         # # make the HABIT ACTION NET
-        policy_net = HabitualAction(**a2c_params)
+        policy_net = PolicyGradientNetwork(**a2c_params)
         policy_net.compile(optimizer=tf.keras.optimizers.Adam())
 
         # make the PRIOR NET
-        value_net = PriorModelBellman(**prior_params)
+        value_net = PriorPreferencesModel(**prior_params)
 
         # make the agent
         a2c_agent = A2CAgent(policy_net=policy_net, value_net=value_net, agent_time_ratio=a2c_agent_time_ratio)
