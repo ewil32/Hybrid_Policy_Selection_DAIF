@@ -33,33 +33,34 @@ class DAIFAgent:
                  min_rewards_needed_to_train_prior=0,
                  prior_model_scaling_factor=1):
         """
-        Initialiser for the agent.
-        :param prior_model:
-        :param vae:
-        :param tran:
-        :param habitual_action_net:
-        :param given_prior_mean:
-        :param given_prior_stddev:
-        :param agent_time_ratio:
-        :param actions_to_execute_when_exploring:
-        :param planning_horizon:
-        :param n_policies:
-        :param n_cem_policy_iterations:
-        :param n_policy_candidates:
-        :param train_vae:
-        :param train_tran:
-        :param train_prior_model:
-        :param train_habit_net:
-        :param train_with_replay:
-        :param train_during_episode:
-        :param use_efe_extrinsic:
-        :param use_kl_intrinsic:
-        :param use_FEEF:
-        :param use_habit_policy:
-        :param uncertainty_tolerance:
-        :param habit_model_type:
-        :param min_rewards_needed_to_train_prior:
-        :param prior_model_scaling_factor:
+        Initializer for the agent. Many of the parameters are flags to specify different settings used in various experiments
+
+        :param prior_model: Instance of prior preferences model that learns agent prior preferences from reward
+        :param vae: Instance of perception model that combines approximate posterior and likelihood networks in VAE style architecture
+        :param tran: Instance of GRU transition model
+        :param habitual_action_net: Instance of habit policy model. Can be DDPG or PolicyGradientNetwork
+        :param given_prior_mean: Numpy array corresponding to mean of agents given prior preferences distribution
+        :param given_prior_stddev: Numpy array corresponding to standard deviation of agents given prior preferences distribution
+        :param agent_time_ratio: Integer for how many times agents selected action is repeated in the environment
+        :param actions_to_execute_when_exploring: How many actions of the CEM should be executed before reconsidering
+        :param planning_horizon: Size of CEM planning horizon
+        :param n_policies: How many policies to consider with CEM
+        :param n_cem_policy_iterations: How many CEM policy iterations
+        :param n_policy_candidates: Top M policies to consider in CEM when calculating new optimal policy distribution
+        :param train_vae: Flag for whether the perception model is trained
+        :param train_tran: Flag for whether the transition model is trained
+        :param train_prior_model: Flag for whether the prior preference model is trained
+        :param train_habit_net: Flag for whether the habit policy is trained
+        :param train_with_replay: Flag for whether to train at the end of an episode
+        :param train_during_episode: Flag for whether to train during the episode
+        :param use_efe_extrinsic: Flag for whether to use the extrinsic component of the EFE (or FEEF)
+        :param use_kl_intrinsic: Flag for whether to use the intrinsic component of the EFE (or FEEF)
+        :param use_FEEF: Flag to use the FEEF rather than EFE
+        :param use_habit_policy: Flag to use the habitual policy or only the CEM
+        :param uncertainty_tolerance: Uncertainty threshold between predicted and actual observation to decide to use habitual action
+        :param habit_model_type: String with either "DDPG" or "A2C" depending on which is used or None if no habit used
+        :param min_rewards_needed_to_train_prior: Integer n where if max(rewards observed) > n prior preference model will be trained
+        :param prior_model_scaling_factor: How much to scale learnt prior preferences when calculating EFE (or FEEF)
         """
 
         super(DAIFAgent, self).__init__()
@@ -136,11 +137,13 @@ class DAIFAgent:
 
     def perceive_and_act(self, observation, reward, done):
         """
+        Takes an observation and reward from the environment and returns an action to execute.
+        Will also train the agent if it is time to train
 
-        :param observation:
-        :param reward:
-        :param done:
-        :return:
+        :param observation: Numpy array corresponding to observation from environment
+        :param reward: Reward obtained given last observation, action, and current observation
+        :param done: Flag for whether the agent is finished the episode
+        :return: Numpy array of action to execute next
         """
 
         # track the world time scale observation sequence
@@ -264,11 +267,12 @@ class DAIFAgent:
 
     def predict_next_observation(self, obs, action, tran_hidden_state):
         """
+        Uses the agents generative model to predict the next observation if action is taken
 
-        :param obs:
-        :param action:
-        :param tran_hidden_state:
-        :return:
+        :param obs: Numpy array of current environment observation
+        :param action: Numpy array of proposed action to execute
+        :param tran_hidden_state: Current memory state of transition model
+        :return: Numpy array of predicted next environment observation
         """
 
         if obs is None:
@@ -324,16 +328,17 @@ class DAIFAgent:
 
     def train_models(self, observations_full, actions, rewards, tran_hidden_state_pre_obs, train_vae=True, train_tran=True, train_prior=True, train_habit=True):
         """
+        Train all of the agents models. Observations should be 1 longer than actions and rewards to capture pre and post action observations
 
-        :param observations_full:
-        :param actions:
-        :param rewards:
-        :param tran_hidden_state_pre_obs:
-        :param train_vae:
-        :param train_tran:
-        :param train_prior:
-        :param train_habit:
-        :return:
+        :param observations_full: Numpy array of observations shape=[number, observation dimension]
+        :param actions: Numpy array of actions taken shape=[number, action dimension]
+        :param rewards: Numpy array of rewards observed shape=[number, 1]
+        :param tran_hidden_state_pre_obs: Transition hidden state prior to first observation in observations_full
+        :param train_vae: Flag for training the perception model
+        :param train_tran: Flag for training the transition model
+        :param train_prior: Flag for training the prior preference model
+        :param train_habit: Flag for training the habitual policy
+        :return: None
         """
 
         # Split observations into pre and post.
@@ -415,9 +420,10 @@ class DAIFAgent:
 
     def select_habit_policy(self, observation):
         """
+        Select an action using the agents habitual policy.
 
-        :param observation:
-        :return:
+        :param observation: Numpy array corresponding to single environment observation
+        :return: Tensorflow tensor with action to execute
         """
 
         # get agents latent state and use it find action with habit model
@@ -432,8 +438,10 @@ class DAIFAgent:
 
     def select_CEM_policy(self, observation):
         """
-        :param observation: needs to be [n, observation_dim] shape np array or tf tensor
-        :return:
+        Plan a policy of length self.planning_horizon using the CEM
+
+        :param observation: Numpy array corresponding to single environment observation, needs to be [n, observation_dim] or same as tf tensor
+        :return: Tensorflow distribution of optimal policy
         """
 
         # get the latent state from this observation
@@ -447,9 +455,9 @@ class DAIFAgent:
 
     def cem_policy_optimisation(self, latent_z):
         """
-
-        :param latent_z:
-        :return:
+        Takes an agents latent representation and plans an optimal policy using the CEM
+        :param latent_z: Tensorflow tensor of agents latent representation
+        :return: Tuple of tensorflow tensors corresponding to mean and standard deviation of best policy
         """
 
         # need to change these two if the policy dimension changes
@@ -462,16 +470,16 @@ class DAIFAgent:
             policies = policy_distr.sample([self.n_policies])
             policies = tf.clip_by_value(policies, clip_value_min=-1, clip_value_max=1)
 
-            # project trajectory into the future using transition model and calculate FEEF for each policy
+            # project trajectory into the future using transition model and calculate EFE for each policy
             policy_results = self.rollout_policies(policies.numpy(), latent_z)
-            expected_free_energy = self.evaluate_policy(*policy_results)
+            expected_free_energy = self.evaluate_policies(*policy_results)
 
             expected_free_energy = tf.convert_to_tensor(expected_free_energy)
 
-            # sum over the time steps to get the FEEF for each policy
+            # sum over the time steps to get the EFE for each policy
             expected_free_energy_sum = tf.reduce_sum(expected_free_energy, axis=0)
 
-            # multiply by -1 to find largest value which is equivalent to smallest FEEF with top_k
+            # multiply by -1 to find largest value which is equivalent to smallest EFE with top_k
             neg_sum = -1*expected_free_energy_sum
 
             result = tf.math.top_k(neg_sum, self.n_policy_candidates, sorted=False)
@@ -486,10 +494,11 @@ class DAIFAgent:
 
     def rollout_policies(self, policies, z_t_minus_one):
         """
-        Rollout policies and compute the expected free energy of each.
-        :param policies:
-        :param z_t_minus_one:
-        :return:
+        Rollout policies using the agents generative model
+
+        :param policies: Tensorflow tensor of shape [self.n_policies, self.planning_horizon, action_dimension]
+        :param z_t_minus_one: Agents current latent state
+        :return: Tuple of predicted observations and latent states needed to calculate EFE of each policy after rolling out policies
         """
 
         # stack up the new observation to have shape (self.n_policies, latent_dim) when z_t_minus is tensor with shape (1, latent_dim)
@@ -535,15 +544,16 @@ class DAIFAgent:
         return policy_posteriors, policy_sds, likelihoods, z_means, z_sds
 
 
-    def evaluate_policy(self, policy_posteriors, policy_sd, predicted_likelihood, predicted_posterior, predicted_posterior_sd):
+    def evaluate_policies(self, policy_posteriors, policy_sd, predicted_likelihood, predicted_posterior, predicted_posterior_sd):
         """
+        Takes information needed to evaluate EFE of policies and evaluates them.
 
-        :param policy_posteriors:
-        :param policy_sd:
-        :param predicted_likelihood:
-        :param predicted_posterior:
-        :param predicted_posterior_sd:
-        :return:
+        :param policy_posteriors: Array containing mean of Q(s_t+1 | s_t, a_t) for all policies at all timesteps
+        :param policy_sd: Array containing standard deviation of Q(s_t+1 | s_t, a_t) for all policies at all timesteps
+        :param predicted_likelihood: Array containing P(o_t+1 | s_t+1) for all policies at all timesteps
+        :param predicted_posterior: Array containing Mean Q(s_t+1 | o_t+1) for all policies at all timesteps
+        :param predicted_posterior_sd: Array containing standard deviation of Q(s_t+1 | o_t+1) for all policies at all timesteps
+        :return: Array containing EFE for all policies at all timesteps
         """
 
         if self.use_FEEF:
@@ -554,13 +564,14 @@ class DAIFAgent:
 
     def FEEF(self, policy_posteriors_list, policy_sd_list, predicted_likelihood_list, predicted_posterior_list, predicted_posterior_sd_list):
         """
+        Calulate FEEF of policies rather than EFE
 
-        :param policy_posteriors_list:
-        :param policy_sd_list:
-        :param predicted_likelihood_list:
-        :param predicted_posterior_list:
-        :param predicted_posterior_sd_list:
-        :return:
+        :param policy_posteriors: Array containing mean of Q(s_t+1 | s_t, a_t) for all policies at all timesteps
+        :param policy_sd: Array containing standard deviation of Q(s_t+1 | s_t, a_t) for all policies at all timesteps
+        :param predicted_likelihood: Array containing P(o_t+1 | s_t+1) for all policies at all timesteps
+        :param predicted_posterior: Array containing Mean Q(s_t+1 | o_t+1) for all policies at all timesteps
+        :param predicted_posterior_sd: Array containing standard deviation of Q(s_t+1 | o_t+1) for all policies at all timesteps
+        :return: Array containing FEEF for all policies at all timesteps
         """
 
         FEEFs = []
@@ -616,13 +627,14 @@ class DAIFAgent:
 
     def EFE(self, policy_posteriors_list, policy_sd_list, predicted_likelihood_list, predicted_posterior_list, predicted_posterior_sd_list):
         """
-        Compute EFE of projected policies
-        :param policy_posteriors_list:
-        :param policy_sd_list:
-        :param predicted_likelihood_list:
-        :param predicted_posterior_list:
-        :param predicted_posterior_sd_list:
-        :return:
+        Calulate EFE of policies
+
+        :param policy_posteriors: Array containing mean of Q(s_t+1 | s_t, a_t) for all policies at all timesteps
+        :param policy_sd: Array containing standard deviation of Q(s_t+1 | s_t, a_t) for all policies at all timesteps
+        :param predicted_likelihood: Array containing P(o_t+1 | s_t+1) for all policies at all timesteps
+        :param predicted_posterior: Array containing Mean Q(s_t+1 | o_t+1) for all policies at all timesteps
+        :param predicted_posterior_sd: Array containing standard deviation of Q(s_t+1 | o_t+1) for all policies at all timesteps
+        :return: Array containing EFE for all policies at all timesteps
         """
 
         EFEs = []

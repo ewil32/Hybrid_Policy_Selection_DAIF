@@ -107,6 +107,7 @@ def compute_discounted_cumulative_reward(rewards, discount_factor):
 
 
 def log_likelihood_gaussian(pred, target, variance, use_consts=True):
+    #  loss function for log likelihood between predicted and target
 
     log_prob = -1 * ((pred - target)**2/(2*variance))
 
