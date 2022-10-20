@@ -1,5 +1,0 @@
-episode,success,sim_steps,noise_stddev,agent_num
-0,False,999,"[0, 0]",0
-1,False,999,"[0, 0]",0
-0,False,999,"[0, 0]",1
-1,False,999,"[0, 0]",1
