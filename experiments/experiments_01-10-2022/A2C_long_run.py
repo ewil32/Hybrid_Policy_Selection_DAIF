@@ -71,10 +71,10 @@ agent_params = {
     "train_habit_net": True,
     "train_with_replay": True,
     "train_during_episode": True,
-    "use_kl_extrinsic": True,
+    "use_efe_extrinsic": True,
     "use_kl_intrinsic": True,
     "use_FEEF": False,
-    "use_fast_thinking": True,
+    "use_habit_policy": True,
     "uncertainty_tolerance": 0.1,
     "habit_model_type": "A2C",
     "min_rewards_needed_to_train_prior": -10,
@@ -93,7 +93,7 @@ HABIT_RUNS = 0
 FLIP_DYNAMICS_RUNS = 0
 EPISODES_BETWEEN_HABIT_TESTS = 10
 
-experiment_name = "A2C_long_run"
+experiment_name = "../../experiment_results/A2C_long_run"
 
 # train the agent on the env
 env = gym.make('MountainCarContinuous-v0')

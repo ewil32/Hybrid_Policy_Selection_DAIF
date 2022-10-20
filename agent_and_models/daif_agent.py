@@ -3,8 +3,7 @@ import tensorflow_probability as tfp
 import numpy as np
 
 
-
-class DAIFAgentRecurrent:
+class DAIFAgent:
 
     def __init__(self,
                  prior_model,
@@ -25,16 +24,46 @@ class DAIFAgentRecurrent:
                  train_habit_net=True,
                  train_with_replay=True,
                  train_during_episode=True,
-                 use_kl_extrinsic=True,
+                 use_efe_extrinsic=True,
                  use_kl_intrinsic=True,
                  use_FEEF=True,
-                 use_fast_thinking=False,
+                 use_habit_policy=False,
                  uncertainty_tolerance=0.05,
                  habit_model_type="name_of_model",
                  min_rewards_needed_to_train_prior=0,
                  prior_model_scaling_factor=1):
+        """
+        Initializer for the agent. Many of the parameters are flags to specify different settings used in various experiments
 
-        super(DAIFAgentRecurrent, self).__init__()
+        :param prior_model: Instance of prior preferences model that learns agent prior preferences from reward
+        :param vae: Instance of perception model that combines approximate posterior and likelihood networks in VAE style architecture
+        :param tran: Instance of GRU transition model
+        :param habitual_action_net: Instance of habit policy model. Can be DDPG or PolicyGradientNetwork
+        :param given_prior_mean: Numpy array corresponding to mean of agents given prior preferences distribution
+        :param given_prior_stddev: Numpy array corresponding to standard deviation of agents given prior preferences distribution
+        :param agent_time_ratio: Integer for how many times agents selected action is repeated in the environment
+        :param actions_to_execute_when_exploring: How many actions of the CEM should be executed before reconsidering
+        :param planning_horizon: Size of CEM planning horizon
+        :param n_policies: How many policies to consider with CEM
+        :param n_cem_policy_iterations: How many CEM policy iterations
+        :param n_policy_candidates: Top M policies to consider in CEM when calculating new optimal policy distribution
+        :param train_vae: Flag for whether the perception model is trained
+        :param train_tran: Flag for whether the transition model is trained
+        :param train_prior_model: Flag for whether the prior preference model is trained
+        :param train_habit_net: Flag for whether the habit policy is trained
+        :param train_with_replay: Flag for whether to train at the end of an episode
+        :param train_during_episode: Flag for whether to train during the episode
+        :param use_efe_extrinsic: Flag for whether to use the extrinsic component of the EFE (or FEEF)
+        :param use_kl_intrinsic: Flag for whether to use the intrinsic component of the EFE (or FEEF)
+        :param use_FEEF: Flag to use the FEEF rather than EFE
+        :param use_habit_policy: Flag to use the habitual policy or only the CEM
+        :param uncertainty_tolerance: Uncertainty threshold between predicted and actual observation to decide to use habitual action
+        :param habit_model_type: String with either "DDPG" or "A2C" depending on which is used or None if no habit used
+        :param min_rewards_needed_to_train_prior: Integer n where if max(rewards observed) > n prior preference model will be trained
+        :param prior_model_scaling_factor: How much to scale learnt prior preferences when calculating EFE (or FEEF)
+        """
+
+        super(DAIFAgent, self).__init__()
 
         # parameters for slow policy planning
         self.planning_horizon = planning_horizon
@@ -52,7 +81,7 @@ class DAIFAgentRecurrent:
 
         # do we use the kl divergence for extrinsic vs intrinsic
         self.use_kl_intrinsic = use_kl_intrinsic
-        self.use_kl_extrinsic = use_kl_extrinsic
+        self.use_efe_extrinsic = use_efe_extrinsic
 
         # do we use the FEEF or EFE?
         self.use_FEEF = use_FEEF
@@ -97,27 +126,24 @@ class DAIFAgentRecurrent:
         self.action_being_executed = None
         self.action_being_executed = 0
 
-        self.use_fast_thinking = use_fast_thinking
+        self.use_habit_policy = use_habit_policy
         self.habit_model_type = habit_model_type
         self.uncertainty_tolerance = uncertainty_tolerance
-        self.num_fast_thinking_choices = 0
-        self.fast_thinking_streak = 0
+        self.num_habit_choices = 0
+        self.habit_policy_streak = 0
 
         # Normally 0 but this is just a bad parameter and I don't know if it should exist
         self.min_rewards_needed_to_train_prior = min_rewards_needed_to_train_prior
 
-
     def perceive_and_act(self, observation, reward, done):
         """
-        The function called to have the agent interact with the environment
-        We assume the agent gets a transformed/noisy observation from the environment and then returns an action
+        Takes an observation and reward from the environment and returns an action to execute.
+        Will also train the agent if it is time to train
 
-        TODO: possibly the agent returns some other information for logging and showing experiments
-
-        :param observation:
-        :param reward:
-        :param done:
-        :return:
+        :param observation: Numpy array corresponding to observation from environment
+        :param reward: Reward obtained given last observation, action, and current observation
+        :param done: Flag for whether the agent is finished the episode
+        :return: Numpy array of action to execute next
         """
 
         # track the world time scale observation sequence
@@ -126,7 +152,8 @@ class DAIFAgentRecurrent:
         # if the episode is finished, then do any training on the full data set
         if done:
 
-            print(self.num_fast_thinking_choices, len(self.full_action_sequence))
+            print("Number of habit choices:", self.num_habit_choices)
+            print("Number of actions total:", len(self.full_action_sequence))
 
             # add the final observation and reward we observed to the sequences
             self.full_observation_sequence.append(observation)
@@ -139,7 +166,6 @@ class DAIFAgentRecurrent:
                                   np.vstack(self.full_action_sequence),
                                   np.array(self.full_reward_sequence),
                                   None)
-
 
         # Otherwise are we at a point where we can reconsider our policy and maybe train the world model
         elif self.time_step % self.agent_time_ratio == 0:
@@ -157,9 +183,6 @@ class DAIFAgentRecurrent:
                 # now we're no longer exploring
                 self.exploring = False
 
-                # print("f", self.full_observation_sequence)
-                # print("e", self.full_observation_sequence[-1*(self.actions_to_execute_when_exploring + 1):])
-
                 if self.train_during_episode:
 
                     # the actions done while exploring were the last self.actions_to_execute_when_exploring
@@ -172,8 +195,6 @@ class DAIFAgentRecurrent:
                                       np.vstack(self.exploring_action_sequence),
                                       np.array(self.exploring_reward_sequence),
                                       tran_hidden_state_pre_obs=self.tran_hidden_state_pre_exploring)
-                    # train_prior=False,
-                    # train_habit=False)
 
 
             # Predict the expected observation based on the previously executed action
@@ -185,54 +206,46 @@ class DAIFAgentRecurrent:
             if not self.exploring:
 
                 # first observation will have no previous observation
-                if self.use_fast_thinking and self.previous_observation is None:
-                    # self.policy_left_to_execute = self.habit_action_model(observation)
-                    self.policy_left_to_execute = self.select_fast_thinking_policy(observation)
+                if self.use_habit_policy and self.previous_observation is None:
+                    self.policy_left_to_execute = self.select_habit_policy(observation)
                     self.policy_left_to_execute = self.policy_left_to_execute.numpy().tolist()  # tf tensor to list
-                    print("fast thinking")
 
-                    self.fast_thinking_streak += 1
+                    self.habit_policy_streak += 1
 
-                # TDOD Fix this to work however it needs to
                 # we need to see what the generative model now thinks about what the expected current observation is
-                elif self.use_fast_thinking and np.allclose(observation, expected_observation, atol=self.uncertainty_tolerance):  # within some tolerance
+                elif self.use_habit_policy and np.allclose(observation, expected_observation, atol=self.uncertainty_tolerance):  # within some tolerance
 
-                    self.policy_left_to_execute = self.select_fast_thinking_policy(observation)
-                    # self.policy_left_to_execute = self.policy_left_to_execute + np.random.normal(0, scale=self.habit_action_model.action_std_dev)
+                    # use habit network to select policy
+                    self.policy_left_to_execute = self.select_habit_policy(observation)
                     self.policy_left_to_execute = self.policy_left_to_execute.numpy().tolist()
 
-                    self.num_fast_thinking_choices += 1
-                    self.fast_thinking_streak += 1
-                    print("fast thinking")
+                    self.num_habit_choices += 1
+                    self.habit_policy_streak += 1
 
-                # the generative model is surprised so we should use the slow deliberation for planning out a policy that balances exploration and exploitation
+                # the generative model is surprised so we should use the CEM for planning out a policy that balances exploration and exploitation
                 else:
 
                     # train the fast thinker because now we're about to explore
-                    if self.train_during_episode and self.fast_thinking_streak > 0:
+                    if self.train_during_episode and self.habit_policy_streak > 0:
                         # the actions done while exploring were the last self.actions_to_execute_when_exploring
-                        fast_thinking_action_sequence = self.full_action_sequence[-1*self.fast_thinking_streak:]
-                        fast_thinking_reward_sequence = self.full_reward_sequence[-1*self.fast_thinking_streak:]
-                        fast_thinking_observation_sequence = self.full_observation_sequence[-1*(self.fast_thinking_streak + 1):]
+                        habit_action_sequence = self.full_action_sequence[-1*self.habit_policy_streak:]
+                        habit_reward_sequence = self.full_reward_sequence[-1*self.habit_policy_streak:]
+                        habit_observation_sequence = self.full_observation_sequence[-1*(self.habit_policy_streak + 1):]
 
                         # Call the training function on the observation sequences to train everything we need to train
-                        self.train_models(np.vstack(fast_thinking_observation_sequence),
-                                          np.vstack(fast_thinking_action_sequence),
-                                          np.array(fast_thinking_reward_sequence),
+                        self.train_models(np.vstack(habit_observation_sequence),
+                                          np.vstack(habit_action_sequence),
+                                          np.array(habit_reward_sequence),
                                           tran_hidden_state_pre_obs=None,
                                           train_vae=False,
                                           train_tran=False)
 
                     # reset the fast thinking streak
-                    self.fast_thinking_streak = 0
+                    self.habit_policy_streak = 0
 
-                    # select a policy with slow thinking
-                    # print("slow thinking")
-                    policy_dist = self.select_policy(observation)
-                    # print("M", policy_dist.mean())
-                    # print("S", policy_dist.stddev())
+                    # select a policy with CEM thinking
+                    policy_dist = self.select_CEM_policy(observation)
                     policy = policy_dist.sample().numpy()
-                    # policy = policy_dist.mean().numpy()
                     policy = policy.reshape(policy.shape[0], self.tran.action_dim).tolist()
                     self.policy_left_to_execute = policy[0: self.actions_to_execute_when_exploring]
 
@@ -240,7 +253,6 @@ class DAIFAgentRecurrent:
                     self.tran_hidden_state_pre_exploring = self.tran_hidden_state
                     self.exploring = True
 
-            # print(self.policy_left_to_execute)
             # finally update the previous observation and action to be the one we just had/did
             self.previous_observation = observation
             self.prev_tran_hidden_state = self.tran_hidden_state
@@ -253,34 +265,44 @@ class DAIFAgentRecurrent:
 
         return self.action_being_executed
 
-
     def predict_next_observation(self, obs, action, tran_hidden_state):
+        """
+        Uses the agents generative model to predict the next observation if action is taken
 
-        # TODO: Fix this with the transition hidden states
+        :param obs: Numpy array of current environment observation
+        :param action: Numpy array of proposed action to execute
+        :param tran_hidden_state: Current memory state of transition model
+        :return: Numpy array of predicted next environment observation
+        """
+
         if obs is None:
             return None, None
         else:
+            # get the agents internal latent state z
             z_mean, z_std, z = self.model_vae.encoder(obs)
             z_mean = z_mean.numpy()
             z_plus_action = np.concatenate([z_mean, action], axis=1)
-            # print(z_plus_action.reshape((1, 1, z_plus_action.shape[1])))
-            # print(z_plus_action.reshape(1, 1, z_plus_action.shape[1]))
             z_plus_action = z_plus_action.reshape((1, 1, z_plus_action.shape[1]))
-            # print(z_plus_action)
 
+            # use transition to predict next parameters of next state distribution
             next_latent_mean, next_latent_sd, next_hidden_state, _ = self.tran((z_plus_action, tran_hidden_state))
 
+            # use likelihood to find predicted next observation
             next_observation = self.model_vae.decoder(next_latent_mean)
-            # print(next_observation)
             return next_observation.numpy(), next_hidden_state
 
-
-    # We use this function to reset the hidden state of the transition model when we want to train on the full data set
     def reset_tran_hidden_state(self):
+        """
+        Function to reset the hidden state of the transition model when we want to train on the full data set
+        :return: None
+        """
         self.tran_hidden_state = None
 
-
     def reset_all_states(self):
+        """
+        Resets all of the agents states. Used when training the agent on a new episode
+        :return: None
+        """
         self.time_step = 0
         self.exploring = False
 
@@ -288,7 +310,6 @@ class DAIFAgentRecurrent:
         self.tran_hidden_state = None
 
         # store the full observations for the episode so we can train using replay
-        self.complete_observation_sequence = []
         self.full_observation_sequence = []
         self.full_action_sequence = []
         self.full_reward_sequence = []
@@ -300,29 +321,27 @@ class DAIFAgentRecurrent:
 
         self.policy_left_to_execute = []
         self.previous_observation = None
-        self.previous_action_executed = None
 
-        self.num_fast_thinking_choices = 0
-        self.fast_thinking_streak = 0
+        self.num_habit_choices = 0
+        self.habit_policy_streak = 0
 
 
     def train_models(self, observations_full, actions, rewards, tran_hidden_state_pre_obs, train_vae=True, train_tran=True, train_prior=True, train_habit=True):
+        """
+        Train all of the agents models. Observations should be 1 longer than actions and rewards to capture pre and post action observations
 
-        # # find the actual observed latent states using the vae
-        # latent_mean, latent_stddev, latent_rep = self.model_vae.encoder(observations_full)
-        #
-        # pre_latent_mean = latent_mean[:-1]
-        # post_latent_mean = latent_mean[1:]
-        # pre_latent_stddev = latent_stddev[:-1]
-        # post_latent_stddev = latent_stddev[1:]
-        # pre_latent = latent_rep[:-1]
-        # post_latent = latent_rep[1:]
-        #
-        # # post_latent_mean, post_latent_stddev, post_latent = self.model_vae.encoder(post_observations)
-        # #
-        # # # pre_observations = observations_full[:-1]
-        # # # post_observations = observations_full[1:]
+        :param observations_full: Numpy array of observations shape=[number, observation dimension]
+        :param actions: Numpy array of actions taken shape=[number, action dimension]
+        :param rewards: Numpy array of rewards observed shape=[number, 1]
+        :param tran_hidden_state_pre_obs: Transition hidden state prior to first observation in observations_full
+        :param train_vae: Flag for training the perception model
+        :param train_tran: Flag for training the transition model
+        :param train_prior: Flag for training the prior preference model
+        :param train_habit: Flag for training the habitual policy
+        :return: None
+        """
 
+        # Split observations into pre and post.
         pre_observations = observations_full[:-1]
         post_observations = observations_full[1:]
 
@@ -334,7 +353,6 @@ class DAIFAgentRecurrent:
         if self.train_tran and train_tran:
 
             num_observations = pre_latent_mean.shape[0]
-            # observation_dim = pre_observations.shape[1]
             action_dim = actions.shape[1]
             latent_dim = self.model_vae.latent_dim
 
@@ -357,7 +375,6 @@ class DAIFAgentRecurrent:
 
             # exclude the last state as this will become the hidden state later on. next hidden state will become our new memory
             h_states_for_training = h_states[:-1]
-            # next_hidden_state = h_states[-1]
 
             # add the current hidden state we saved to the start. This has h0, h1, h2, .. h=num_observations - 1
             h_states_for_training = tf.concat([tran_hidden_state_pre_obs, h_states_for_training], axis=0)
@@ -366,37 +383,30 @@ class DAIFAgentRecurrent:
             self.tran.fit((z_train_singles, h_states_for_training), (post_latent_mean, post_latent_stddev), epochs=self.tran.train_epochs, verbose=self.tran.show_training, batch_size=z_train_singles.shape[0])
 
             # now find the new predicted hidden state that we will use for finding the policy
-            # TODO not sure if I should pass the old hidden state or reset it to 0
             _, _, final_hidden_state, h_states = self.tran((z_train_seq, tran_hidden_state_pre_obs))
-            # _, _, final_hidden_state, _ = self.tran((z_train_seq, None))
 
             z_pred, _, _, _ = self.tran((z_train_singles, h_states_for_training))
 
+            # update the transition model hidden states
             self.prev_tran_hidden_state = h_states[:, -2, :]
             self.tran_hidden_state = final_hidden_state
 
-
         #### TRAIN THE VAE ####
         if self.train_vae and train_vae:
-            # train the vae model on post_observations because these are all new
-            # self.model_vae.fit(pre_observations_raw, epochs=self.vae_train_epochs, verbose=self.show_vae_training)
             self.model_vae.fit(pre_observations, epochs=self.model_vae.train_epochs, verbose=self.model_vae.show_training, batch_size=pre_observations.shape[0])
 
-
         #### TRAIN THE PRIOR MODEL ####
-        # TODO fix how this part should work
         if self.train_prior and train_prior:
             if max(rewards) > self.min_rewards_needed_to_train_prior:
                 # self.prior_model.train(post_observations, rewards)
                 self.prior_model.train(post_latent_mean, rewards)
 
-
         #### TRAIN THE HABIT ACTION NET ####
         if self.train_habit_net and train_habit:
 
+            # training is different depending on the habit model because we need to calculate advantage for A2C
             if self.habit_model_type == "A2C":
 
-                # TODO I think for the final state the V(s_t+1) should be set to 0
                 # ADVANTAGE
                 v_state = self.prior_model(pre_latent_mean)
                 v_plus_one_state = self.prior_model(post_latent_mean)
@@ -408,96 +418,87 @@ class DAIFAgentRecurrent:
             if self.habit_model_type == "DDPG":
                 self.habit_action_model.train(pre_latent_mean, actions, rewards, post_latent_mean)
 
+    def select_habit_policy(self, observation):
+        """
+        Select an action using the agents habitual policy.
 
-    def select_fast_thinking_policy(self, observation):
+        :param observation: Numpy array corresponding to single environment observation
+        :return: Tensorflow tensor with action to execute
+        """
 
-        # TODO should you select the mean here?
-        # _,  _, latent_state = self.model_vae.encoder(observation)
+        # get agents latent state and use it find action with habit model
         latent_state,  _, _ = self.model_vae.encoder(observation)
         action = self.habit_action_model.select_action(latent_state)
-        # print(action)
-        # print(tfp.distributions.MultivariateNormalDiag(loc=action, scale_diag=[self.habit_action_model.action_std_dev]).sample())
+
+        # if we're using A2C we should sample from distribution or DDPG is deterministic
         if self.habit_model_type == "A2C":
             return tfp.distributions.MultivariateNormalDiag(loc=action, scale_diag=[self.habit_action_model.action_std_dev]).sample()
         elif self.habit_model_type == "DDPG":
             return action
 
-
-    def select_policy(self, observation):
+    def select_CEM_policy(self, observation):
         """
-        :param observation: needs to be [n, observation_dim] shape np array or tf tensor
-        :return:
+        Plan a policy of length self.planning_horizon using the CEM
+
+        :param observation: Numpy array corresponding to single environment observation, needs to be [n, observation_dim] or same as tf tensor
+        :return: Tensorflow distribution of optimal policy
         """
 
-        # TODO do you take the mean or that latent here?
         # get the latent state from this observation
-        # TODO should I use the mean here?
         _,  _, latent_state = self.model_vae.encoder(observation)
-        # latent_state,  _, _ = self.model_vae.encoder(observation)
-        # latent_state = latent_state.numpy().reshape((1, latent_state.shape[0]))
-        # print(latent_state)
-        # print(latent_state)
+
         # select the policy
         policy_mean, policy_stddev = self.cem_policy_optimisation(latent_state)
 
         # return a distribution that we can sample from
         return tfp.distributions.MultivariateNormalDiag(loc=policy_mean, scale_diag=policy_stddev)
 
-
-    # TODO Fix this so we can use different action dimensions
     def cem_policy_optimisation(self, latent_z):
+        """
+        Takes an agents latent representation and plans an optimal policy using the CEM
+        :param latent_z: Tensorflow tensor of agents latent representation
+        :return: Tuple of tensorflow tensors corresponding to mean and standard deviation of best policy
+        """
 
         # need to change these two if the policy dimension changes
         mean_best_policies = tf.zeros((self.planning_horizon, self.tran.action_dim))
         std_best_policies = tf.ones((self.planning_horizon, self.tran.action_dim))
 
-        # print(mean_best_policies)
-        # print(mean_best_policies.shape)
-
+        # perform I iterations of CEM
         for i in range(self.n_cem_policy_iterations):
             policy_distr = tfp.distributions.MultivariateNormalDiag(loc=mean_best_policies, scale_diag=std_best_policies)
             policies = policy_distr.sample([self.n_policies])
-            # print("p", policies.shape)
             policies = tf.clip_by_value(policies, clip_value_min=-1, clip_value_max=1)
-            # policies = tf.clip_by_value(policies, clip_value_min=-1, clip_value_max=1)
 
-            # project trajectory into the future using transition model and calculate FEEF for each policy
-            policy_results = self.forward_policies(policies.numpy(), latent_z)
-            FEEFs = self.evaluate_policy(*policy_results)
+            # project trajectory into the future using transition model and calculate EFE for each policy
+            policy_results = self.rollout_policies(policies.numpy(), latent_z)
+            expected_free_energy = self.evaluate_policies(*policy_results)
 
-            # print("POLICIES", policies)
-            # print("FEEFS", FEEFs)
+            expected_free_energy = tf.convert_to_tensor(expected_free_energy)
 
-            FEEFs = tf.convert_to_tensor(FEEFs)
+            # sum over the time steps to get the EFE for each policy
+            expected_free_energy_sum = tf.reduce_sum(expected_free_energy, axis=0)
 
-            # sum over the timesteps to get the FEEF for each policy
-            FEEFs_sum = tf.reduce_sum(FEEFs, axis=0)
+            # multiply by -1 to find largest value which is equivalent to smallest EFE with top_k
+            neg_sum = -1*expected_free_energy_sum
 
-            # multiply by -1 to find largest value which is euqivalent to smallest FEEF with top_k
-            neg_FEEF_sum = -1*FEEFs_sum
-
-            result = tf.math.top_k(neg_FEEF_sum, self.n_policy_candidates, sorted=False)
-            min_FEEF_indices = result.indices
+            result = tf.math.top_k(neg_sum, self.n_policy_candidates, sorted=False)
+            min_indices = result.indices
 
             # update the policy distributions
-            mean_best_policies = tf.reduce_mean(tf.gather(policies, min_FEEF_indices), axis=0)
-            std_best_policies = tf.math.reduce_std(tf.gather(policies, min_FEEF_indices), axis=0)
-
-
-        # TODO not sure why we need all of this is with the x means? I think it's for training but maybe not
-
-        # One last forward pass to gather the stats of the policy mean
-        #FEEFs, next_x_means, next_x_stds = self._forward_policies(mean_best_policies.unsqueeze(1))
-        # return mean_best_policies, std_best_policies, FEEFs.detach().squeeze(1), next_x_means.detach().squeeze(1), next_x_stds.detach().squeeze(1)
+            mean_best_policies = tf.reduce_mean(tf.gather(policies, min_indices), axis=0)
+            std_best_policies = tf.math.reduce_std(tf.gather(policies, min_indices), axis=0)
 
         return mean_best_policies, std_best_policies
 
 
-    def forward_policies(self, policies, z_t_minus_one):
+    def rollout_policies(self, policies, z_t_minus_one):
         """
-        Forward propogate a policy and compute the FEEF of each policy
-        :param z_t_minus_one:
-        :return:
+        Rollout policies using the agents generative model
+
+        :param policies: Tensorflow tensor of shape [self.n_policies, self.planning_horizon, action_dimension]
+        :param z_t_minus_one: Agents current latent state
+        :return: Tuple of predicted observations and latent states needed to calculate EFE of each policy after rolling out policies
         """
 
         # stack up the new observation to have shape (self.n_policies, latent_dim) when z_t_minus is tensor with shape (1, latent_dim)
@@ -516,21 +517,16 @@ class DAIFAgentRecurrent:
         else:
             cur_hidden_state = np.vstack([self.tran_hidden_state]*self.n_policies)
 
-        # print(cur_hidden_state)
-
         # find the predicted latent states from the transition model
         for t in range(self.planning_horizon):
 
-            # print(prev_latent_mean)
-            # print(policies[:, t, :].shape)
-            ob_plus_action = np.concatenate([prev_latent_mean, policies[:, t, :]], axis=1)
-            tran_input = ob_plus_action.reshape((self.n_policies, 1, ob_plus_action.shape[1]))  # reshape to pass to GRU
+            # concatenate the latent state and action for the transition model. Then reshape to pass to GRU
+            latent_plus_action = np.concatenate([prev_latent_mean, policies[:, t, :]], axis=1)
+            tran_input = latent_plus_action.reshape((self.n_policies, 1, latent_plus_action.shape[1]))
 
-            # print(tran_input.shape)
+            next_latent_mean, next_latent_sd, next_hidden_state, _ = self.tran((tran_input, cur_hidden_state))  # shape = [num policies, latent dim]
 
-            next_latent_mean, next_latent_sd, next_hidden_state, _ = self.tran((tran_input, cur_hidden_state))  # shape = [num policies, latent dim
-
-            # update the hidden state for use with the next policies
+            # update the GRU hidden state for use with the next policies
             cur_hidden_state = next_hidden_state
 
             policy_posteriors.append(next_latent_mean)
@@ -548,7 +544,17 @@ class DAIFAgentRecurrent:
         return policy_posteriors, policy_sds, likelihoods, z_means, z_sds
 
 
-    def evaluate_policy(self, policy_posteriors, policy_sd, predicted_likelihood, predicted_posterior, predicted_posterior_sd):
+    def evaluate_policies(self, policy_posteriors, policy_sd, predicted_likelihood, predicted_posterior, predicted_posterior_sd):
+        """
+        Takes information needed to evaluate EFE of policies and evaluates them.
+
+        :param policy_posteriors: Array containing mean of Q(s_t+1 | s_t, a_t) for all policies at all timesteps
+        :param policy_sd: Array containing standard deviation of Q(s_t+1 | s_t, a_t) for all policies at all timesteps
+        :param predicted_likelihood: Array containing P(o_t+1 | s_t+1) for all policies at all timesteps
+        :param predicted_posterior: Array containing Mean Q(s_t+1 | o_t+1) for all policies at all timesteps
+        :param predicted_posterior_sd: Array containing standard deviation of Q(s_t+1 | o_t+1) for all policies at all timesteps
+        :return: Array containing EFE for all policies at all timesteps
+        """
 
         if self.use_FEEF:
             return self.FEEF(policy_posteriors, policy_sd, predicted_likelihood, predicted_posterior, predicted_posterior_sd)
@@ -558,11 +564,14 @@ class DAIFAgentRecurrent:
 
     def FEEF(self, policy_posteriors_list, policy_sd_list, predicted_likelihood_list, predicted_posterior_list, predicted_posterior_sd_list):
         """
-        Compute the FEEF for policy selection
-        :param policy_posteriors:
-        :param predicted_likelihood:
-        :param predicted_posterior:
-        :return:
+        Calulate FEEF of policies rather than EFE
+
+        :param policy_posteriors: Array containing mean of Q(s_t+1 | s_t, a_t) for all policies at all timesteps
+        :param policy_sd: Array containing standard deviation of Q(s_t+1 | s_t, a_t) for all policies at all timesteps
+        :param predicted_likelihood: Array containing P(o_t+1 | s_t+1) for all policies at all timesteps
+        :param predicted_posterior: Array containing Mean Q(s_t+1 | o_t+1) for all policies at all timesteps
+        :param predicted_posterior_sd: Array containing standard deviation of Q(s_t+1 | o_t+1) for all policies at all timesteps
+        :return: Array containing FEEF for all policies at all timesteps
         """
 
         FEEFs = []
@@ -576,17 +585,12 @@ class DAIFAgentRecurrent:
             predicted_posterior = predicted_posterior_list[t]
             predicted_posterior_sd = predicted_posterior_sd_list[t]
 
-            # !!!! evaluate the EXTRINSIC KL divergence !!!!
-
-            # convert to normal distributions
-            # TODO Why is the stddev 1s here? I think because we assume it is on the true state of the world.
-
-            if self.use_kl_extrinsic:
+            # evaluate the extrinsic part of FEEF
+            if self.use_efe_extrinsic:
                 likelihood_dist = tfp.distributions.MultivariateNormalDiag(loc=predicted_likelihood, scale_diag=np.ones_like(predicted_likelihood))
 
                 if self.prior_model is None:
 
-                    # TODO how exactly is the prior defined? After you apply transformations what is the prior
                     # create the prior distribution
                     prior_preferences_mean = tf.convert_to_tensor(np.stack([self.given_prior_mean]*self.n_policies), dtype="float32")
                     prior_preferences_stddev = tf.convert_to_tensor(np.stack([self.given_prior_stddev]*self.n_policies), dtype="float32")
@@ -604,7 +608,7 @@ class DAIFAgentRecurrent:
             else:
                 kl_extrinsic = tf.zeros(self.n_policies, dtype="float")
 
-            # !!!! evaluate the KL INTRINSIC part !!!!
+            # evaluate the KL INTRINSIC part
             if self.use_kl_intrinsic:
 
                 policy_posteriors_dist = tfp.distributions.MultivariateNormalDiag(loc=policy_posteriors, scale_diag=policy_sd)
@@ -615,24 +619,22 @@ class DAIFAgentRecurrent:
             else:
                 kl_intrinsic = tf.zeros(self.n_policies, dtype="float")
 
-            # print("Extrinsic", kl_extrinsic)
-            # print("Intrinsic", kl_intrinsic)
-
+            # combine the extrinsic and intrinsic parts for total FEEF
             FEEF = kl_extrinsic - kl_intrinsic
-
             FEEFs.append(FEEF)
 
         return FEEFs
 
-
-    # TODO Find out how this works with the log probability extrinsic term
     def EFE(self, policy_posteriors_list, policy_sd_list, predicted_likelihood_list, predicted_posterior_list, predicted_posterior_sd_list):
         """
-        Compute the EFE for policy selection
-        :param policy_posteriors:
-        :param predicted_likelihood:
-        :param predicted_posterior:
-        :return:
+        Calulate EFE of policies
+
+        :param policy_posteriors: Array containing mean of Q(s_t+1 | s_t, a_t) for all policies at all timesteps
+        :param policy_sd: Array containing standard deviation of Q(s_t+1 | s_t, a_t) for all policies at all timesteps
+        :param predicted_likelihood: Array containing P(o_t+1 | s_t+1) for all policies at all timesteps
+        :param predicted_posterior: Array containing Mean Q(s_t+1 | o_t+1) for all policies at all timesteps
+        :param predicted_posterior_sd: Array containing standard deviation of Q(s_t+1 | o_t+1) for all policies at all timesteps
+        :return: Array containing EFE for all policies at all timesteps
         """
 
         EFEs = []
@@ -646,17 +648,11 @@ class DAIFAgentRecurrent:
             predicted_posterior = predicted_posterior_list[t]
             predicted_posterior_sd = predicted_posterior_sd_list[t]
 
-            # !!!! evaluate the EXTRINSIC KL divergence !!!!
-
-            # convert to normal distributions
-            # TODO Why is the stddev 1s here? I think because we assume it is on the true state of the world.
-
-            if self.use_kl_extrinsic:
-                likelihood_dist = tfp.distributions.MultivariateNormalDiag(loc=predicted_likelihood, scale_diag=np.ones_like(predicted_likelihood))
+            # evaluate the extrinsic EFE
+            if self.use_efe_extrinsic:
 
                 if self.prior_model is None:
 
-                    # TODO how exactly is the prior defined? After you apply transformations what is the prior
                     # create the prior distribution
                     prior_preferences_mean = tf.convert_to_tensor(np.stack(self.given_prior_mean), dtype="float32")
                     prior_preferences_stddev = tf.convert_to_tensor(np.stack(self.given_prior_stddev), dtype="float32")
@@ -666,9 +662,7 @@ class DAIFAgentRecurrent:
                     # compute extrinsic prior preferences term
                     efe_extrinsic = -1 * tf.math.log(prior_dist.prob(predicted_likelihood))
 
-                # TODO Can I use the learned prior model here?
                 else:
-                    # efe_extrinsic = self.prior_model.extrinsic_kl(predicted_likelihood)
                     efe_extrinsic = 1 - self.prior_model_scaling_factor * self.prior_model(predicted_posterior)
                     efe_extrinsic = tf.reduce_sum(efe_extrinsic, axis=-1)
 
@@ -676,24 +670,18 @@ class DAIFAgentRecurrent:
             else:
                 efe_extrinsic = tf.zeros(self.n_policies, dtype="float")
 
-            # !!!! evaluate the KL INTRINSIC part !!!!
+            # evaluate the KL INTRINSIC part
             if self.use_kl_intrinsic:
 
                 policy_posteriors_dist = tfp.distributions.MultivariateNormalDiag(loc=policy_posteriors, scale_diag=policy_sd)
                 predicted_posterior_dist = tfp.distributions.MultivariateNormalDiag(loc=predicted_posterior, scale_diag=predicted_posterior_sd)
-
                 kl_intrinsic = tfp.distributions.kl_divergence(predicted_posterior_dist, policy_posteriors_dist)
 
             else:
                 kl_intrinsic = tf.zeros(self.n_policies, dtype="float")
 
-            # print("EX")
-            # print(efe_extrinsic)
-            # print("IN")
-            # print(kl_intrinsic)
-
+            # combine for full EFE
             EFE = efe_extrinsic - kl_intrinsic
-
             EFEs.append(EFE)
 
         return EFEs

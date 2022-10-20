@@ -1,7 +1,16 @@
 import numpy as np
 import pandas as pd
 
+
 def random_observation_sequence(env, length, epsilon=0.5, render_env=False):
+    """
+    Execute a random sequence of actions in the environment env, and return the observation, action, and reward sequence
+    :param env: OpenAI gym environment
+    :param length: Integer representing max episode length
+    :param epsilon: Probability of changing action with observation
+    :param render_env: Boolean for whether the environment be shown
+    :return: Tuple of observations, actions, and rewards
+    """
 
     observation = env.reset()
 
@@ -13,7 +22,7 @@ def random_observation_sequence(env, length, epsilon=0.5, render_env=False):
 
     for _ in range(length):
 
-        # change action with epsilon change action, else repeat the same action
+        # change action with epsilon probability, else repeat the same action
         if np.random.uniform(0, 1) < epsilon:
             action = env.action_space.sample()
 
@@ -34,13 +43,6 @@ def random_observation_sequence(env, length, epsilon=0.5, render_env=False):
 
 
 def transform_observations(observations, observation_max=None, observation_min=None, noise_stddev=None):
-    """
-    https://www.gymlibrary.ml/environments/classic_control/mountain_car_continuous/
-
-    Transform mountain car observations to be in the range 0 to 1
-    :param observations:
-    :return:
-    """
 
     if observation_max is not None and observation_min is not None:
         observations_scaled = (observations - observation_min)/(observation_max - observation_min)
@@ -68,10 +70,6 @@ def transform_image(img, x_min, x_max, y_min, y_max):
 
 def test_policy(env, policy_func, observation_max, observation_min, obs_stddev, num_episodes, num_action_repeats, show_env=False):
 
-    all_rewards = []
-    all_times = []
-    all_num_actions = []
-
     rows = []
 
     for i in range(num_episodes):
@@ -92,7 +90,6 @@ def test_policy(env, policy_func, observation_max, observation_min, obs_stddev, 
 
             action = policy_func(obs)
             action = action.numpy()
-            # print(action)
 
             for k in range(num_action_repeats):
                 obs, reward, done, info = env.step(action)
@@ -105,9 +102,6 @@ def test_policy(env, policy_func, observation_max, observation_min, obs_stddev, 
             rewards.append(reward)
 
         rows.append([np.sum(rewards), t, t//num_action_repeats])
-        # all_rewards.append(np.sum(rewards))
-        # all_times.append(t)
-        # all_num_actions.append(t//num_action_repeats)
 
     env.close()
 
@@ -119,7 +113,7 @@ def test_policy(env, policy_func, observation_max, observation_min, obs_stddev, 
 def habit_policy(agent):
 
     def f(obs):
-        action = agent.select_fast_thinking_policy(obs)
+        action = agent.select_habit_policy(obs)
         return action
 
     return f

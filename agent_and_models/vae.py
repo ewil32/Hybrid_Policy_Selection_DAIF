@@ -6,7 +6,6 @@ import numpy as np
 
 
 class Sampling(layers.Layer):
-    """Uses (z_mean, z_stddev) to sample z, the vector encoding a digit."""
 
     def call(self, inputs):
         z_mean, z_stddev = inputs
@@ -84,9 +83,6 @@ class VAE(keras.Model):
         self.train_epochs = train_epochs
         self.show_training = show_training
 
-
-
-
     @property
     def metrics(self):
         return [
@@ -110,17 +106,13 @@ class VAE(keras.Model):
         reg_dist = tfp.distributions.MultivariateNormalDiag(loc=self.reg_mean, scale_diag=self.reg_stddev)
         kl_loss = tfp.distributions.kl_divergence(posterior_dist, reg_dist)
 
-        # kl_loss = tf.reduce_sum(kl_loss, axis=1)
         total_loss = reconstruction_loss + kl_loss
         return total_loss
-
 
     def train_step(self, data):
 
         # unpack data
-        # x, reg_vals = data
         x = data
-        # reg_mean, reg_stddev = reg_vals
         with tf.GradientTape() as tape:
             z_mean, z_stddev, z = self.encoder(x)
             reconstruction = self.decoder(z)
@@ -131,7 +123,6 @@ class VAE(keras.Model):
             reg_dist = tfp.distributions.MultivariateNormalDiag(loc=self.reg_mean, scale_diag=self.reg_stddev)
             kl_loss = tfp.distributions.kl_divergence(posterior_dist, reg_dist)
 
-            # kl_loss = tf.reduce_sum(kl_loss, axis=1)
             total_loss = reconstruction_loss + kl_loss
 
         grads = tape.gradient(total_loss, self.trainable_weights)

@@ -9,15 +9,11 @@ tf.config.set_visible_devices([], 'GPU')
 actor_params = {
     "observation_dim": 2,
     "action_max": 1,
-    # "hidden_units": [16, 16]
 }
 
 critic_params = {
     "observation_dim": 2,
     "action_dim": 1,
-    # "state_hidden_units": [16],
-    # "action_hidden_units": [16],
-    # "out_hidden_units": [20]
 }
 
 observation_max = np.array([0.6, 0.07])
