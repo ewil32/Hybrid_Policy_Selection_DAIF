@@ -6,7 +6,6 @@ import numpy as np
 
 
 class Sampling(layers.Layer):
-    """Uses (z_mean, z_stddev) to sample z, the vector encoding a digit."""
 
     def call(self, inputs):
         z_mean, z_stddev = inputs
@@ -84,9 +83,6 @@ class VAE(keras.Model):
         self.train_epochs = train_epochs
         self.show_training = show_training
 
-
-
-
     @property
     def metrics(self):
         return [
@@ -112,7 +108,6 @@ class VAE(keras.Model):
 
         total_loss = reconstruction_loss + kl_loss
         return total_loss
-
 
     def train_step(self, data):
 

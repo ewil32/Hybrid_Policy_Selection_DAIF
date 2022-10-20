@@ -263,6 +263,13 @@ class DAIFAgent:
         return self.action_being_executed
 
     def predict_next_observation(self, obs, action, tran_hidden_state):
+        """
+
+        :param obs:
+        :param action:
+        :param tran_hidden_state:
+        :return:
+        """
 
         if obs is None:
             return None, None
@@ -282,7 +289,7 @@ class DAIFAgent:
 
     def reset_tran_hidden_state(self):
         """
-        We use this function to reset the hidden state of the transition model when we want to train on the full data set
+        Function to reset the hidden state of the transition model when we want to train on the full data set
         :return: None
         """
         self.tran_hidden_state = None
@@ -547,10 +554,12 @@ class DAIFAgent:
 
     def FEEF(self, policy_posteriors_list, policy_sd_list, predicted_likelihood_list, predicted_posterior_list, predicted_posterior_sd_list):
         """
-        Compute the FEEF for policy selection
-        :param policy_posteriors:
-        :param predicted_likelihood:
-        :param predicted_posterior:
+
+        :param policy_posteriors_list:
+        :param policy_sd_list:
+        :param predicted_likelihood_list:
+        :param predicted_posterior_list:
+        :param predicted_posterior_sd_list:
         :return:
         """
 
