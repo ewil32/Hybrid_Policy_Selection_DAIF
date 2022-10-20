@@ -93,7 +93,7 @@ HABIT_RUNS = 0
 FLIP_DYNAMICS_RUNS = 0
 EPISODES_BETWEEN_HABIT_TESTS = 10
 
-experiment_name = "A2C_long_run"
+experiment_name = "../../experiment_results/A2C_long_run"
 
 # train the agent on the env
 env = gym.make('MountainCarContinuous-v0')

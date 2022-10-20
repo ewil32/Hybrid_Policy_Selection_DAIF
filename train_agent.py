@@ -1,8 +1,7 @@
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-
-from util import transform_observations, transform_image
+from util import transform_observations
 
 
 def train_single_agent(mcc_env,
@@ -31,6 +30,7 @@ def train_single_agent(mcc_env,
         # apply noise to and scaling to first observation
         observation_noisy = transform_observations(first_observation, obs_max, obs_min, observation_noise_stddev)
         observation_noisy = observation_noisy.reshape(1, observation_noisy.shape[0])
+
         # loop until episode ends or the agent succeeds
         t = 0
         reward = None
